@@ -1,5 +1,6 @@
 x-common-volumes: &common-volumes
   - ./:/MoneyPrinterTurbo
+  - ./:/opt/project
 
 services:
   webui:

@@ -25,6 +25,7 @@ from app.models.schema import (
     TaskQueryResponse,
     TaskResponse,
     TaskVideoRequest,
+    TaskVideo2Request
 )
 from app.services import state as sm
 from app.services import task as tm
@@ -70,6 +71,28 @@ def create_audio(
     background_tasks: BackgroundTasks, request: Request, body: AudioRequest
 ):
     return create_task(request, body, stop_at="audio")
+
+
+@router.post("/video2", response_model=TaskResponse, summary="Generate a short video")
+def create_video2(
+    background_tasks: BackgroundTasks, request: Request, body: TaskVideo2Request
+):
+    task_id = utils.get_uuid()
+    request_id = base.get_task_id(request)
+    try:
+        task = {
+            "task_id": task_id,
+            "request_id": request_id,
+            "params": body.model_dump(),
+        }
+        sm.state.update_task(task_id)
+        task_manager.add_task(tm.start2, task_id=task_id, params=body)
+        logger.success(f"Task created: {utils.to_json(task)}")
+        return utils.get_response(200, task)
+    except ValueError as e:
+        raise HttpException(
+            task_id=task_id, status_code=400, message=f"{request_id}: {str(e)}"
+        )
 
 
 def create_task(

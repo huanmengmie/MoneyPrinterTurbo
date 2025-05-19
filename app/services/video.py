@@ -4,6 +4,7 @@ import os
 import random
 import gc
 import shutil
+from math import sin, pi
 from typing import List
 from loguru import logger
 from moviepy import (
@@ -120,7 +121,7 @@ def combine_videos(
     audio_file: str,
     video_aspect: VideoAspect = VideoAspect.portrait,
     video_concat_mode: VideoConcatMode = VideoConcatMode.random,
-    video_transition_mode: VideoTransitionMode = None,
+    video_transition_mode: VideoTransitionMode = VideoTransitionMode.fade_in,
     max_clip_duration: int = 5,
     threads: int = 2,
 ) -> str:
@@ -515,7 +516,10 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
             # t represents the current time, and clip.duration is the total duration of the clip (3 seconds).
             # Note: 1 represents 100% size, so 1.2 represents 120% size.
             zoom_clip = clip.resized(
-                lambda t: 1 + (clip_duration * 0.03) * (t / clip.duration)
+                clip.resize(
+                    lambda t: 1 + 0.15 * sin((t / clip.duration) * pi / 2),  # 正弦缓动 + 更小幅度
+                    method="bicubic"
+                )
             )
 
             # Optionally, create a composite video clip containing the zoomed clip.
@@ -528,4 +532,21 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
             close_clip(clip)
             material.url = video_file
             logger.success(f"image processed: {video_file}")
+        elif ext in const.FILE_TYPE_VIDEOS:
+            if clip.duration != material.duration:
+                if clip.duration < material.duration:
+                    # 循环补足时长
+                    loops = int(material.duration / clip.duration) + 1
+                    final_clip = concatenate_videoclips([clip] * loops).subclip(0, material.duration)
+                else:
+                    # 截取中间部分
+                    start_time = (clip.duration - material.duration) / 2
+                    final_clip = clip.subclip(start_time, start_time + material.duration)
+
+                # 输出处理后的视频
+                video_file = f"{material.url}_adjusted.mp4"
+                final_clip.write_videofile(video_file, fps=30, logger=None)
+                close_clip(clip)
+                material.url = video_file
+                logger.success(f"video duration adjusted: {material.duration}s")
     return materials

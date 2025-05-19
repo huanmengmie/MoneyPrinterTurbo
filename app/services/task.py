@@ -7,7 +7,7 @@ from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import VideoConcatMode, VideoParams
+from app.models.schema import VideoConcatMode, VideoParams, TaskVideo2Request, MaterialInfo
 from app.services import llm, material, subtitle, video, voice
 from app.services import state as sm
 from app.utils import utils
@@ -70,9 +70,9 @@ def save_script_data(task_id, video_script, video_terms, params):
         f.write(utils.to_json(script_data))
 
 
-def generate_audio(task_id, params, video_script):
+def generate_audio(task_id, params, video_script, prefix='all'):
     logger.info("\n\n## generating audio")
-    audio_file = path.join(utils.task_dir(task_id), "audio.mp3")
+    audio_file = path.join(utils.task_dir(task_id), f"{prefix}_audio.mp3")
     sub_maker = voice.tts(
         text=video_script,
         voice_name=voice.parse_voice_name(params.voice_name),
@@ -329,11 +329,113 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     return kwargs
 
 
+def start2(task_id, params: TaskVideo2Request):
+    logger.info(f"start task: {task_id}")
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
+
+    if type(params.video_concat_mode) is str:
+        params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
+
+    # 1. Generate script
+    # video_script = generate_script(task_id, params)
+    # if not video_script or "Error: " in video_script:
+    #     sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+    #     return
+    video_script = " ".join(params.video_script)
+
+    # sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=10)
+    #
+    # # 2. Generate terms
+    # video_terms = ""
+    # if params.video_source != "local":
+    #     video_terms = generate_terms(task_id, params, video_script)
+    #     if not video_terms:
+    #         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+    #         return
+    #
+    # save_script_data(task_id, video_script, video_terms, params)
+
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=20)
+
+    # 3. Generate audio
+    audio_file, audio_duration, sub_maker = generate_audio(
+        task_id, params, video_script
+    )
+
+    t_ad = 0
+    for i, s in enumerate(params.video_script):
+        _, ad, _ = generate_audio(task_id, params, s, prefix=f"part{i+1}")
+        params.video_materials[i].duration = ad
+        t_ad += ad
+    print('时长测试', audio_duration, t_ad)
+
+    if not audio_file:
+        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        return
+
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=30)
+
+    # 4. Generate subtitle
+    subtitle_path = generate_subtitle(
+        task_id, params, video_script, sub_maker, audio_file
+    )
+
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
+
+    # 5. Get video materials
+    downloaded_videos = get_video_materials(
+        task_id, params, '', audio_duration
+    )
+    if not downloaded_videos:
+        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        return
+
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=50)
+
+    # 6. Generate final videos
+    final_video_paths, combined_video_paths = generate_final_videos(
+        task_id, params, downloaded_videos, audio_file, subtitle_path
+    )
+
+    if not final_video_paths:
+        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        return
+
+    logger.success(
+        f"task {task_id} finished, generated {len(final_video_paths)} videos."
+    )
+
+    kwargs = {
+        "videos": final_video_paths,
+        "combined_videos": combined_video_paths,
+        "script": video_script,
+        "terms": '',
+        "audio_file": audio_file,
+        "audio_duration": audio_duration,
+        "subtitle_path": subtitle_path,
+        "materials": downloaded_videos,
+    }
+    sm.state.update_task(
+        task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs
+    )
+    return kwargs
+
+
 if __name__ == "__main__":
     task_id = "task_id"
-    params = VideoParams(
-        video_subject="金钱的作用",
+    params = TaskVideo2Request(
+        video_subject='测试',
+        video_script=["早睡早起精神好，子午小憩不可少。",
+                       "三餐规律营养全，五谷蔬果多尝鲜。",
+                       "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
+                       "每日步行千步走，气血通畅病不有。",
+                       "梳头百遍头不晕，耳常按摩听力稳。",
+                       "冷水洗脸身耐寒，热水泡脚睡眠安。",
+                       "情绪稳定少烦恼，笑口常开疾病跑。",
+                       "日光之下常晒晒，阴阳调和身自在。"],
+        video_materials=[MaterialInfo(url=f'/MoneyPrinterTurbo/test/resources/{i}.png') for i in range(8)],
         voice_name="zh-CN-XiaoyiNeural-Female",
         voice_rate=1.0,
+        video_source="local",
     )
-    start(task_id, params, stop_at="video")
+    print(start2(task_id, params))

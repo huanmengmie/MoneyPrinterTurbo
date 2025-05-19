@@ -177,6 +177,11 @@ class TaskVideoRequest(VideoParams, BaseModel):
     pass
 
 
+class TaskVideo2Request(VideoParams, BaseModel):
+    video_script: list[str]
+    video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.sequential.value
+    pass
+
 class TaskQueryRequest(BaseModel):
     pass
 
