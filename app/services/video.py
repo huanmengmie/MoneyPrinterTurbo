@@ -147,14 +147,17 @@ def combine_videos(
         close_clip(clip)
         
         start_time = 0
+        subclipped_items.append(
+            SubClippedVideoClip(file_path=video_path, start_time=start_time, end_time=clip_duration, width=clip_w,
+                                height=clip_h))
 
-        while start_time < clip_duration:
-            end_time = min(start_time + max_clip_duration, clip_duration)            
-            if clip_duration - start_time >= max_clip_duration:
-                subclipped_items.append(SubClippedVideoClip(file_path= video_path, start_time=start_time, end_time=end_time, width=clip_w, height=clip_h))
-            start_time = end_time    
-            if video_concat_mode.value == VideoConcatMode.sequential.value:
-                break
+        # while start_time < clip_duration:
+        #     end_time = min(start_time + max_clip_duration, clip_duration)
+        #     if clip_duration - start_time >= max_clip_duration:
+        #         subclipped_items.append(SubClippedVideoClip(file_path= video_path, start_time=start_time, end_time=end_time, width=clip_w, height=clip_h))
+        #     start_time = end_time
+        #     if video_concat_mode.value == VideoConcatMode.sequential.value:
+        #         break
 
     # random subclipped_items order
     if video_concat_mode.value == VideoConcatMode.random.value:
@@ -231,15 +234,15 @@ def combine_videos(
             logger.error(f"failed to process clip: {str(e)}")
     
     # loop processed clips until the video duration matches or exceeds the audio duration.
-    if video_duration < audio_duration:
-        logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
-        base_clips = processed_clips.copy()
-        for clip in itertools.cycle(base_clips):
-            if video_duration >= audio_duration:
-                break
-            processed_clips.append(clip)
-            video_duration += clip.duration
-        logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
+    # if video_duration < audio_duration:
+    #     logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
+    #     base_clips = processed_clips.copy()
+    #     for clip in itertools.cycle(base_clips):
+    #         if video_duration >= audio_duration:
+    #             break
+    #         processed_clips.append(clip)
+    #         video_duration += clip.duration
+    #     logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
      
     # merge video clips progressively, avoid loading all videos at once to avoid memory overflow
     logger.info("starting clip merging process")
@@ -501,52 +504,55 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
         if width < 480 or height < 480:
             logger.warning(f"low resolution material: {width}x{height}, minimum 480x480 required")
             continue
-
-        if ext in const.FILE_TYPE_IMAGES:
-            logger.info(f"processing image: {material.url}")
-            # Create an image clip and set its duration to 3 seconds
-            clip = (
-                ImageClip(material.url)
-                .with_duration(clip_duration)
-                .with_position("center")
-            )
-            # Apply a zoom effect using the resize method.
-            # A lambda function is used to make the zoom effect dynamic over time.
-            # The zoom effect starts from the original size and gradually scales up to 120%.
-            # t represents the current time, and clip.duration is the total duration of the clip (3 seconds).
-            # Note: 1 represents 100% size, so 1.2 represents 120% size.
-            zoom_clip = clip.resized(
-                clip.resize(
-                    lambda t: 1 + 0.15 * sin((t / clip.duration) * pi / 2),  # 正弦缓动 + 更小幅度
-                    method="bicubic"
+        try:
+            if ext in const.FILE_TYPE_IMAGES:
+                logger.info(f"processing image: {material.url}")
+                # Create an image clip and set its duration to 3 seconds
+                clip = (
+                    ImageClip(material.url)
+                    .with_duration(material.duration)
+                    .with_position("center")
                 )
-            )
+                # Apply a zoom effect using the resize method.
+                # A lambda function is used to make the zoom effect dynamic over time.
+                # The zoom effect starts from the original size and gradually scales up to 120%.
+                # t represents the current time, and clip.duration is the total duration of the clip (3 seconds).
+                # Note: 1 represents 100% size, so 1.2 represents 120% size.
+                zoom_clip = clip.resized(
+                    lambda t: 1 + (clip_duration * 0.01) * (t / clip.duration)
+                )
 
-            # Optionally, create a composite video clip containing the zoomed clip.
-            # This is useful when you want to add other elements to the video.
-            final_clip = CompositeVideoClip([zoom_clip])
+                # Optionally, create a composite video clip containing the zoomed clip.
+                # This is useful when you want to add other elements to the video.
+                final_clip = CompositeVideoClip([zoom_clip])
 
-            # Output the video to a file.
-            video_file = f"{material.url}.mp4"
-            final_clip.write_videofile(video_file, fps=30, logger=None)
-            close_clip(clip)
-            material.url = video_file
-            logger.success(f"image processed: {video_file}")
-        elif ext in const.FILE_TYPE_VIDEOS:
-            if clip.duration != material.duration:
-                if clip.duration < material.duration:
-                    # 循环补足时长
-                    loops = int(material.duration / clip.duration) + 1
-                    final_clip = concatenate_videoclips([clip] * loops).subclip(0, material.duration)
-                else:
-                    # 截取中间部分
-                    start_time = (clip.duration - material.duration) / 2
-                    final_clip = clip.subclip(start_time, start_time + material.duration)
-
-                # 输出处理后的视频
-                video_file = f"{material.url}_adjusted.mp4"
+                # Output the video to a file.
+                video_file = f"{material.url}.mp4"
                 final_clip.write_videofile(video_file, fps=30, logger=None)
                 close_clip(clip)
                 material.url = video_file
-                logger.success(f"video duration adjusted: {material.duration}s")
+                logger.success(f"image processed: {video_file}")
+            elif ext in const.FILE_TYPE_VIDEOS:
+                if clip.duration != material.duration:
+                    if clip.duration < material.duration:
+                        # 循环补足时长
+                        loops = int(material.duration / clip.duration) + 1
+                        final_clip = concatenate_videoclips([clip] * loops).subclip(0, material.duration)
+                    else:
+                        # 截取中间部分
+                        start_time = (clip.duration - material.duration) / 2
+                        final_clip = clip.subclip(start_time, start_time + material.duration)
+
+                    # 输出处理后的视频
+                    video_file = f"{material.url}_adjusted.mp4"
+                    final_clip.write_videofile(video_file, fps=30, logger=None)
+                    close_clip(clip)
+                    material.url = video_file
+                    logger.success(f"video duration adjusted: {material.duration}s")
+        except Exception as e:
+            logger.error(f"failed to process material: {str(e)}")
     return materials
+
+
+if __name__ == '__main__':
+    preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png', duration=2) for i in range(3)], clip_duration=4)

@@ -365,8 +365,8 @@ def start2(task_id, params: TaskVideo2Request):
     t_ad = 0
     for i, s in enumerate(params.video_script):
         _, ad, _ = generate_audio(task_id, params, s, prefix=f"part{i+1}")
-        params.video_materials[i].duration = ad
-        t_ad += ad
+        params.video_materials[i].duration = ad - 0.3 if ad >= 1 else ad
+        t_ad += params.video_materials[i].duration
     print('时长测试', audio_duration, t_ad)
 
     if not audio_file:
@@ -433,9 +433,16 @@ if __name__ == "__main__":
                        "冷水洗脸身耐寒，热水泡脚睡眠安。",
                        "情绪稳定少烦恼，笑口常开疾病跑。",
                        "日光之下常晒晒，阴阳调和身自在。"],
-        video_materials=[MaterialInfo(url=f'/MoneyPrinterTurbo/test/resources/{i}.png') for i in range(8)],
+        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in range(8)],
         voice_name="zh-CN-XiaoyiNeural-Female",
         voice_rate=1.0,
         video_source="local",
     )
     print(start2(task_id, params))
+
+    # downloaded_videos = [f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png.mp4' for i in range(8)]
+    # audio_file = r'C:\code\github\MoneyPrinterTurbo\storage\tasks\task_id\all_audio.mp3'
+    # subtitle_path = r'C:\code\github\MoneyPrinterTurbo\storage\tasks\task_id\subtitle.srt'
+    # final_video_paths, combined_video_paths = generate_final_videos(
+    #     task_id, params, downloaded_videos, audio_file, subtitle_path
+    # )
