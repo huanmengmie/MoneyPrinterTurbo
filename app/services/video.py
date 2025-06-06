@@ -506,7 +506,7 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
             continue
         try:
             if ext in const.FILE_TYPE_IMAGES:
-                logger.info(f"processing image: {material.url}")
+                logger.info(f"processing image: {material.url}, {material.duration}")
                 # Create an image clip and set its duration to 3 seconds
                 clip = (
                     ImageClip(material.url)

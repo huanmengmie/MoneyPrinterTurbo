@@ -2,6 +2,7 @@ import math
 import os.path
 import re
 from os import path
+from pathlib import Path
 
 from loguru import logger
 
@@ -10,6 +11,7 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams, TaskVideo2Request, MaterialInfo
 from app.services import llm, material, subtitle, video, voice
 from app.services import state as sm
+from app.services.srt import calculate_durations, match_subtitles_to_scripts
 from app.utils import utils
 
 
@@ -362,12 +364,12 @@ def start2(task_id, params: TaskVideo2Request):
         task_id, params, video_script
     )
 
-    t_ad = 0
-    for i, s in enumerate(params.video_script):
-        _, ad, _ = generate_audio(task_id, params, s, prefix=f"part{i+1}")
-        params.video_materials[i].duration = ad - 0.3 if ad >= 1 else ad
-        t_ad += params.video_materials[i].duration
-    print('时长测试', audio_duration, t_ad)
+    # t_ad = 0
+    # for i, s in enumerate(params.video_script):
+    #     _, ad, _ = generate_audio(task_id, params, s, prefix=f"part{i+1}")
+    #     params.video_materials[i].duration = ad - 0.3 if ad >= 1 else ad
+    #     t_ad += params.video_materials[i].duration
+    # print('时长测试', audio_duration, t_ad)
 
     if not audio_file:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
@@ -381,6 +383,18 @@ def start2(task_id, params: TaskVideo2Request):
     )
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
+
+    srt_content = Path(subtitle_path).read_text(encoding='utf-8')
+    subtitle_entries = calculate_durations(srt_content)
+    matched_results = match_subtitles_to_scripts(subtitle_entries, params.video_script)
+    last_time = 0
+    for index, result in enumerate(matched_results):
+        if index == len(matched_results) - 1:
+            duration = round(audio_duration - last_time, 3)
+        else:
+            duration = round(result['end_ms'] - last_time, 3)
+            last_time = result['end_ms']
+        params.video_materials[index].duration = duration
 
     # 5. Get video materials
     downloaded_videos = get_video_materials(
@@ -422,7 +436,7 @@ def start2(task_id, params: TaskVideo2Request):
 
 
 if __name__ == "__main__":
-    task_id = "task_id"
+    task_id = "task_id2"
     params = TaskVideo2Request(
         video_subject='测试',
         video_script=["早睡早起精神好，子午小憩不可少。",
@@ -440,9 +454,23 @@ if __name__ == "__main__":
     )
     print(start2(task_id, params))
 
-    # downloaded_videos = [f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png.mp4' for i in range(8)]
-    # audio_file = r'C:\code\github\MoneyPrinterTurbo\storage\tasks\task_id\all_audio.mp3'
-    # subtitle_path = r'C:\code\github\MoneyPrinterTurbo\storage\tasks\task_id\subtitle.srt'
-    # final_video_paths, combined_video_paths = generate_final_videos(
-    #     task_id, params, downloaded_videos, audio_file, subtitle_path
+    # task_id = "task_id"
+    # params = TaskVideo2Request(
+    #     video_subject='测试',
+    #     video_script=["今天，我们要去森林里参加派对啦！",
+    #                   "哇，森林里有这么多可爱的小伙伴！",
+    #                   "和小伙伴们一起玩游戏，太开心啦！",
+    #                   "美味的午餐，大家一起分享！",
+    #                   "听，美妙的音乐响起来啦！",
+    #                   "去河边抓小鱼咯！",
+    #                   "篝火旁的时光，温暖又美好！",
+    #                   "今天的派对太难忘啦，下次还要再来！",
+    #                   "再见啦，森林！我们会想你们的！",
+    #                   "把今天的快乐画下来，永远珍藏！", ],
+    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/儿童绘画创作 ({i}).png') for i in
+    #                      range(10)],
+    #     voice_name="zh-CN-XiaoyiNeural-Female",
+    #     voice_rate=1.0,
+    #     video_source="local",
     # )
+    # print(start2(task_id, params))
