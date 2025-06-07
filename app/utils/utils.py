@@ -6,6 +6,10 @@ import threading
 from typing import Any
 from uuid import uuid4
 
+import time
+from functools import wraps
+
+
 import urllib3
 from loguru import logger
 
@@ -228,3 +232,20 @@ def load_locales(i18n_dir):
 
 def parse_extension(filename):
     return Path(filename).suffix.lower().lstrip('.')
+
+
+def timeit(func):
+    """测量函数执行时间的装饰器"""
+
+    @wraps(func)  # 保留原函数的元信息
+    def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()  # 高精度计时开始
+        result = func(*args, **kwargs)  # 执行被装饰的函数
+        end_time = time.perf_counter()  # 高精度计时结束
+        elapsed = end_time - start_time  # 计算耗时
+
+        # 打印耗时信息（保留6位小数）
+        print(f"函数 {func.__name__} 执行耗时: {elapsed:.6f} 秒")
+        return result
+
+    return wrapper

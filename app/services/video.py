@@ -4,6 +4,9 @@ import os
 import random
 import gc
 import shutil
+import subprocess
+import time
+import traceback
 from math import sin, pi
 from typing import List
 from loguru import logger
@@ -19,7 +22,7 @@ from moviepy import (
     concatenate_videoclips,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
-from PIL import ImageFont
+from PIL import ImageFont, Image
 
 from app.models import const
 from app.models.schema import (
@@ -31,6 +34,7 @@ from app.models.schema import (
 )
 from app.services.utils import video_effects
 from app.utils import utils
+
 
 class SubClippedVideoClip:
     def __init__(self, file_path, start_time=None, end_time=None, width=None, height=None, duration=None):
@@ -114,7 +118,7 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
 
     return ""
 
-
+@utils.timeit
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],
@@ -234,15 +238,15 @@ def combine_videos(
             logger.error(f"failed to process clip: {str(e)}")
     
     # loop processed clips until the video duration matches or exceeds the audio duration.
-    # if video_duration < audio_duration:
-    #     logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
-    #     base_clips = processed_clips.copy()
-    #     for clip in itertools.cycle(base_clips):
-    #         if video_duration >= audio_duration:
-    #             break
-    #         processed_clips.append(clip)
-    #         video_duration += clip.duration
-    #     logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
+    if video_duration < audio_duration:
+        logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
+        base_clips = processed_clips.copy()
+        for clip in itertools.cycle(base_clips):
+            if video_duration >= audio_duration:
+                break
+            processed_clips.append(clip)
+            video_duration += clip.duration
+        logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
      
     # merge video clips progressively, avoid loading all videos at once to avoid memory overflow
     logger.info("starting clip merging process")
@@ -300,8 +304,9 @@ def combine_videos(
             continue
     
     # after merging, rename final result to target file name
-    os.rename(temp_merged_video, combined_video_path)
-    
+    # os.rename(temp_merged_video, combined_video_path)
+    shutil.move(temp_merged_video, combined_video_path)
+
     # clean temp files
     clip_files = [clip.file_path for clip in processed_clips]
     delete_files(clip_files)
@@ -309,7 +314,7 @@ def combine_videos(
     logger.info("video combining completed")
     return combined_video_path
 
-
+@utils.timeit
 def wrap_text(text, max_width, font="Arial", fontsize=60):
     # Create ImageFont
     font = ImageFont.truetype(font, fontsize)
@@ -363,7 +368,7 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     height = len(_wrapped_lines_) * height
     return result, height
 
-
+@utils.timeit
 def generate_video(
     video_path: str,
     audio_path: str,
@@ -488,7 +493,66 @@ def generate_video(
     del video_clip
 
 
-def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
+def create_zoom_video_rock_solid_smooth(image_path: str, output_path: str, duration: int, fps: int = 30,
+                                        zoom_factor: float = 1.1, target_size: tuple = (1080, 1920)):
+    """
+    通过预先放大分辨率，创建更平滑的缩放视频。
+    """
+    total_frames = duration * fps
+    out_w, out_h = target_size
+
+    # 预先将图片放大到 8000 像素宽，以便缩放时更平滑
+    pre_scale_width = 8000
+
+    zoom_expr = f"1+(on/{total_frames})*({zoom_factor}-1)"
+    x_expr = f"trunc((iw-iw/({zoom_expr}))/2)"
+    y_expr = f"trunc((ih-ih/({zoom_expr}))/2)"
+
+    filter_string = (
+        f"scale={pre_scale_width}:-1,"  # 预先放大分辨率
+        f"zoompan="
+        f"z='{zoom_expr}':"
+        f"x='{x_expr}':"
+        f"y='{y_expr}':"
+        f"d={total_frames}:"
+        f"s={out_w}x{out_h}"
+    )
+
+    command = [
+        'ffmpeg',
+        '-y',
+        '-loop', '1',
+        '-i', image_path,
+        '-vf', filter_string,
+        '-c:v', 'libx264',
+        '-t', str(duration),
+        '-pix_fmt', 'yuv420p',
+        '-r', str(fps),
+        '-preset', 'veryfast',
+        output_path
+    ]
+
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        return True
+    except FileNotFoundError:
+        print(f"Error: 'ffmpeg' not found.")
+        return False
+    except subprocess.CalledProcessError as e:
+        print("Error during FFmpeg execution:")
+        print("Command:", ' '.join(e.cmd))
+        print("Return code:", e.returncode)
+        print("Stderr:", e.stderr)
+        return False
+
+@utils.timeit
+def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920)):
     for material in materials:
         if not material.url:
             continue
@@ -507,30 +571,19 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
         try:
             if ext in const.FILE_TYPE_IMAGES:
                 logger.info(f"processing image: {material.url}, {material.duration}")
-                # Create an image clip and set its duration to 3 seconds
-                clip = (
-                    ImageClip(material.url)
-                    .with_duration(material.duration)
-                    .with_position("center")
-                )
-                # Apply a zoom effect using the resize method.
-                # A lambda function is used to make the zoom effect dynamic over time.
-                # The zoom effect starts from the original size and gradually scales up to 120%.
-                # t represents the current time, and clip.duration is the total duration of the clip (3 seconds).
-                # Note: 1 represents 100% size, so 1.2 represents 120% size.
-                zoom_clip = clip.resized(
-                    lambda t: 1 + (clip_duration * 0.01) * (t / clip.duration)
-                )
-
-                # Optionally, create a composite video clip containing the zoomed clip.
-                # This is useful when you want to add other elements to the video.
-                final_clip = CompositeVideoClip([zoom_clip])
-
-                # Output the video to a file.
                 video_file = f"{material.url}.mp4"
-                final_clip.write_videofile(video_file, fps=30, logger=None)
-                close_clip(clip)
-                material.url = video_file
+                success = create_zoom_video_rock_solid_smooth(  # 调用优化后的函数
+                    image_path=material.url,
+                    output_path=video_file,
+                    duration=material.duration,
+                    target_size=target_size
+                )
+
+                if success:
+                    material.url = video_file
+                    logger.success(f"Image processed via FFmpeg: {video_file}")
+                else:
+                    logger.error(f"Failed to process image with FFmpeg: {material.url}")
                 logger.success(f"image processed: {video_file}")
             elif ext in const.FILE_TYPE_VIDEOS:
                 if clip.duration != material.duration:
@@ -542,7 +595,6 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
                         # 截取中间部分
                         start_time = (clip.duration - material.duration) / 2
                         final_clip = clip.subclip(start_time, start_time + material.duration)
-
                     # 输出处理后的视频
                     video_file = f"{material.url}_adjusted.mp4"
                     final_clip.write_videofile(video_file, fps=30, logger=None)
@@ -551,8 +603,13 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
                     logger.success(f"video duration adjusted: {material.duration}s")
         except Exception as e:
             logger.error(f"failed to process material: {str(e)}")
+            traceback.print_exc()
     return materials
 
-
 if __name__ == '__main__':
-    preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png', duration=2) for i in range(3)], clip_duration=4)
+    # preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
+    combine_videos(combined_video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
+                   video_paths=[f'C:/code/github/MoneyPrinterTurbo/test/combine/temp-clip-{i}.mp4' for i in range(1, 9)],
+                   audio_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3')
+    pass
+

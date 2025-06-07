@@ -129,7 +129,7 @@ def get_video_materials(task_id, params, video_terms, audio_duration):
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
-            materials=params.video_materials, clip_duration=params.video_clip_duration
+            materials=params.video_materials
         )
         if not materials:
             sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
