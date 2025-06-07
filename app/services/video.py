@@ -1,14 +1,13 @@
+import gc
 import glob
-import itertools
 import os
 import random
-import gc
-import shutil
 import subprocess
 import time
 import traceback
-from math import sin, pi
 from typing import List
+
+from PIL import ImageFont
 from loguru import logger
 from moviepy import (
     AudioFileClip,
@@ -22,7 +21,6 @@ from moviepy import (
     concatenate_videoclips,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
-from PIL import ImageFont, Image
 
 from app.models import const
 from app.models.schema import (
@@ -32,7 +30,6 @@ from app.models.schema import (
     VideoParams,
     VideoTransitionMode,
 )
-from app.services.utils import video_effects
 from app.utils import utils
 
 
@@ -51,10 +48,10 @@ class SubClippedVideoClip:
     def __str__(self):
         return f"SubClippedVideoClip(file_path={self.file_path}, start_time={self.start_time}, end_time={self.end_time}, duration={self.duration}, width={self.width}, height={self.height})"
 
-
 audio_codec = "aac"
 video_codec = "libx264"
 fps = 30
+DEFAULT_TRANSITION_DURATION = 0.2 # seconds, default transition duration
 
 def close_clip(clip):
     if clip is None:
@@ -66,7 +63,7 @@ def close_clip(clip):
             clip.reader.close()
             
         # close audio resources
-        if hasattr(clip, 'audio') and clip.audio is not None:
+        if hasattr(clip.audio, 'reader') and clip.audio.reader is not None:
             if hasattr(clip.audio, 'reader') and clip.audio.reader is not None:
                 clip.audio.reader.close()
             del clip.audio
@@ -91,11 +88,10 @@ def close_clip(clip):
         logger.error(f"failed to close clip: {str(e)}")
     
     del clip
-    gc.collect()
 
 def delete_files(files: List[str] | str):
     if isinstance(files, str):
-        files = [files]
+        files = files
         
     for file in files:
         try:
@@ -118,24 +114,36 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
 
     return ""
 
+def get_video_duration_ffprobe(file_path: str) -> float | None:
+    """
+    使用 ffprobe 获取视频文件的精确持续时间。
+    """
+    command = [
+        'ffprobe',
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        file_path
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
+        return float(result.stdout.strip())
+    except Exception as e:
+        logger.error(f"Failed to get video duration with ffprobe for {file_path}: {e}")
+        return None
+
 @utils.timeit
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],
     audio_file: str,
     video_aspect: VideoAspect = VideoAspect.portrait,
-    video_concat_mode: VideoConcatMode = VideoConcatMode.random,
+    video_concat_mode: VideoConcatMode = VideoConcatMode.sequential,
     video_transition_mode: VideoTransitionMode = VideoTransitionMode.fade_in,
-    max_clip_duration: int = 5,
-    threads: int = 2,
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     audio_duration = audio_clip.duration
     logger.info(f"audio duration: {audio_duration} seconds")
-    # Required duration of each clip
-    req_dur = audio_duration / len(video_paths)
-    req_dur = max_clip_duration
-    logger.info(f"maximum clip duration: {req_dur} seconds")
     output_dir = os.path.dirname(combined_video_path)
 
     aspect = VideoAspect(video_aspect)
@@ -155,25 +163,13 @@ def combine_videos(
             SubClippedVideoClip(file_path=video_path, start_time=start_time, end_time=clip_duration, width=clip_w,
                                 height=clip_h))
 
-        # while start_time < clip_duration:
-        #     end_time = min(start_time + max_clip_duration, clip_duration)
-        #     if clip_duration - start_time >= max_clip_duration:
-        #         subclipped_items.append(SubClippedVideoClip(file_path= video_path, start_time=start_time, end_time=end_time, width=clip_w, height=clip_h))
-        #     start_time = end_time
-        #     if video_concat_mode.value == VideoConcatMode.sequential.value:
-        #         break
-
     # random subclipped_items order
     if video_concat_mode.value == VideoConcatMode.random.value:
         random.shuffle(subclipped_items)
         
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
-    # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
     for i, subclipped_item in enumerate(subclipped_items):
-        if video_duration > audio_duration:
-            break
-        
         logger.debug(f"processing clip {i+1}: {subclipped_item.width}x{subclipped_item.height}, current duration: {video_duration:.2f}s, remaining: {audio_duration - video_duration:.2f}s")
         
         try:
@@ -201,117 +197,176 @@ def combine_videos(
                     clip_resized = clip.resized(new_size=(new_width, new_height)).with_position("center")
                     clip = CompositeVideoClip([background, clip_resized])
                     
-            shuffle_side = random.choice(["left", "right", "top", "bottom"])
-            if video_transition_mode.value == VideoTransitionMode.none.value:
-                clip = clip
-            elif video_transition_mode.value == VideoTransitionMode.fade_in.value:
-                clip = video_effects.fadein_transition(clip, 1)
-            elif video_transition_mode.value == VideoTransitionMode.fade_out.value:
-                clip = video_effects.fadeout_transition(clip, 1)
-            elif video_transition_mode.value == VideoTransitionMode.slide_in.value:
-                clip = video_effects.slidein_transition(clip, 1, shuffle_side)
-            elif video_transition_mode.value == VideoTransitionMode.slide_out.value:
-                clip = video_effects.slideout_transition(clip, 1, shuffle_side)
-            elif video_transition_mode.value == VideoTransitionMode.shuffle.value:
-                transition_funcs = [
-                    lambda c: video_effects.fadein_transition(c, 1),
-                    lambda c: video_effects.fadeout_transition(c, 1),
-                    lambda c: video_effects.slidein_transition(c, 1, shuffle_side),
-                    lambda c: video_effects.slideout_transition(c, 1, shuffle_side),
-                ]
-                shuffle_transition = random.choice(transition_funcs)
-                clip = shuffle_transition(clip)
-
-            if clip.duration > max_clip_duration:
-                clip = clip.subclipped(0, max_clip_duration)
-                
             # wirte clip to temp file
             clip_file = f"{output_dir}/temp-clip-{i+1}.mp4"
             clip.write_videofile(clip_file, logger=None, fps=fps, codec=video_codec)
-            
+            time.sleep(0.1) # Add a small delay to ensure file is fully written
             close_clip(clip)
         
-            processed_clips.append(SubClippedVideoClip(file_path=clip_file, duration=clip.duration, width=clip_w, height=clip_h))
-            video_duration += clip.duration
+            # Get actual duration of the written clip file using ffprobe
+            actual_clip_duration = get_video_duration_ffprobe(clip_file)
+            if actual_clip_duration is None:
+                logger.warning(f"Could not get actual duration for {clip_file}, using estimated duration.")
+                actual_clip_duration = clip_duration # Fallback to moviepy's duration
+
+            processed_clips.append(SubClippedVideoClip(file_path=clip_file, duration=actual_clip_duration, width=clip_w, height=clip_h))
+            video_duration += actual_clip_duration
             
         except Exception as e:
             logger.error(f"failed to process clip: {str(e)}")
     
-    # loop processed clips until the video duration matches or exceeds the audio duration.
-    if video_duration < audio_duration:
-        logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
-        base_clips = processed_clips.copy()
-        for clip in itertools.cycle(base_clips):
-            if video_duration >= audio_duration:
-                break
-            processed_clips.append(clip)
-            video_duration += clip.duration
-        logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
-     
-    # merge video clips progressively, avoid loading all videos at once to avoid memory overflow
-    logger.info("starting clip merging process")
+    logger.debug(f"Processed clips details:")
+    for idx, clip_item in enumerate(processed_clips):
+        logger.debug(f"  Clip {idx}: {clip_item.file_path}, Duration: {clip_item.duration:.2f}s")
+    logger.debug(f"Total video duration from processed clips: {video_duration:.2f}s")
+
+    # Use FFmpeg xfade filter to merge video clips with transitions
+    logger.info("starting FFmpeg xfade process")
     if not processed_clips:
         logger.warning("no clips available for merging")
         return combined_video_path
+
+    # Prepare inputs for FFmpeg
+    ffmpeg_inputs = []
+    for clip_item in processed_clips:
+        ffmpeg_inputs.extend(['-i', clip_item.file_path])
     
-    # if there is only one clip, use it directly
+    # Add audio file as an input
+    audio_input_index = len(processed_clips)
+    ffmpeg_inputs.extend(['-i', audio_file])
+
+    # Build complex filtergraph for xfade transitions
+    filter_graph = []
+    transition_duration = DEFAULT_TRANSITION_DURATION # seconds, as per user's request for 0.2s fade
+    
+    # Map VideoTransitionMode to FFmpeg xfade types
+    xfade_types = {
+        VideoTransitionMode.none: "concat", # Use concat filter if no transition
+        VideoTransitionMode.fade_in: "fade",
+        VideoTransitionMode.fade_out: "fade", # fade_out is handled by fade type in xfade
+        VideoTransitionMode.slide_in: ["slideup", "slidedown", "slideright", "slideleft"], # Will pick randomly
+        VideoTransitionMode.slide_out: ["slideup", "slidedown", "slideright", "slideleft"], # Will pick randomly
+        VideoTransitionMode.shuffle: ["fade", "wipeleft", "wiperight", "wipeup", "wipedown", "slideup", "slidedown", "slideright", "slideleft", "dissolve"], # More options for shuffle
+    }
+
+    # Build xfade chain
+    # The first input stream is [0:v], the second is [1:v], etc.
+    # The output of each xfade is named [v_out_i]
+    # The next xfade takes [v_out_i] and [i+1:v] as inputs
+    
+    # If there's only one clip, no xfade is needed, just map it directly
     if len(processed_clips) == 1:
-        logger.info("using single clip directly")
-        shutil.copy(processed_clips[0].file_path, combined_video_path)
-        delete_files(processed_clips)
-        logger.info("video combining completed")
-        return combined_video_path
-    
-    # create initial video file as base
-    base_clip_path = processed_clips[0].file_path
-    temp_merged_video = f"{output_dir}/temp-merged-video.mp4"
-    temp_merged_next = f"{output_dir}/temp-merged-next.mp4"
-    
-    # copy first clip as initial merged video
-    shutil.copy(base_clip_path, temp_merged_video)
-    
-    # merge remaining video clips one by one
-    for i, clip in enumerate(processed_clips[1:], 1):
-        logger.info(f"merging clip {i}/{len(processed_clips)-1}, duration: {clip.duration:.2f}s")
+        final_video_stream = "[0:v]"
+    else:
+        # Start with the first two clips
+        current_output_stream = f"[0:v][1:v]"
+        current_cumulative_duration = processed_clips[0].duration
         
-        try:
-            # load current base video and next clip to merge
-            base_clip = VideoFileClip(temp_merged_video)
-            next_clip = VideoFileClip(clip.file_path)
-            
-            # merge these two clips
-            merged_clip = concatenate_videoclips([base_clip, next_clip])
+        # Determine xfade type for the first transition
+        xfade_type = "fade" # Default to fade
+        if video_transition_mode == VideoTransitionMode.none:
+            xfade_type = "concat"
+        elif video_transition_mode == VideoTransitionMode.fade_in or video_transition_mode == VideoTransitionMode.fade_out:
+            xfade_type = "fade"
+        elif video_transition_mode == VideoTransitionMode.slide_in or video_transition_mode == VideoTransitionMode.slide_out:
+            xfade_type = random.choice(["slideup", "slidedown", "slideright", "slideleft"])
+        elif video_transition_mode == VideoTransitionMode.shuffle:
+            xfade_type = random.choice(xfade_types[VideoTransitionMode.shuffle])
 
-            # save merged result to temp file
-            merged_clip.write_videofile(
-                filename=temp_merged_next,
-                threads=threads,
-                logger=None,
-                temp_audiofile_path=output_dir,
-                audio_codec=audio_codec,
-                fps=fps,
-            )
-            close_clip(base_clip)
-            close_clip(next_clip)
-            close_clip(merged_clip)
+        if xfade_type == "concat":
+            filter_graph.append(f"{current_output_stream}concat=n=2:v=1:a=0[v_out_0]")
+        else:
+            # Offset for xfade should be (duration of previous video) - (transition duration)
+            offset = current_cumulative_duration - transition_duration
+            filter_graph.append(f"{current_output_stream}xfade=transition={xfade_type}:duration={transition_duration}:offset={offset}[v_out_0]")
+        
+        current_cumulative_duration += processed_clips[1].duration - transition_duration # Subtract transition duration from next clip's effective duration
+        
+        # Chain subsequent clips
+        for i in range(2, len(processed_clips)):
+            prev_output_stream = f"[v_out_{i-2}]"
+            next_input_stream = f"[{i}:v]"
             
-            # replace base file with new merged file
-            delete_files(temp_merged_video)
-            os.rename(temp_merged_next, temp_merged_video)
+            # Determine xfade type for current transition
+            xfade_type = "fade" # Default to fade
+            if video_transition_mode == VideoTransitionMode.none:
+                xfade_type = "concat"
+            elif video_transition_mode == VideoTransitionMode.fade_in or video_transition_mode == VideoTransitionMode.fade_out:
+                xfade_type = "fade"
+            elif video_transition_mode == VideoTransitionMode.slide_in or video_transition_mode == VideoTransitionMode.slide_out:
+                xfade_type = random.choice(["slideup", "slidedown", "slideright", "slideleft"])
+            elif video_transition_mode == VideoTransitionMode.shuffle:
+                xfade_type = random.choice(xfade_types[VideoTransitionMode.shuffle])
+
+            if xfade_type == "concat":
+                filter_graph.append(f"{prev_output_stream}{next_input_stream}concat=n=2:v=1:a=0[v_out_{i-1}]")
+            else:
+                # Offset for xfade should be (duration of previous combined video) - (transition duration)
+                offset = current_cumulative_duration - transition_duration
+                filter_graph.append(f"{prev_output_stream}{next_input_stream}xfade=transition={xfade_type}:duration={transition_duration}:offset={offset}[v_out_{i-1}]")
             
-        except Exception as e:
-            logger.error(f"failed to merge clip: {str(e)}")
-            continue
+            current_cumulative_duration += processed_clips[i].duration - transition_duration # Subtract transition duration from next clip's effective duration
+        
+        final_video_stream = f"[v_out_{len(processed_clips)-2}]" # The last output stream
+
+    # FFmpeg command
+    command = [
+        'ffmpeg',
+        '-y',  # Overwrite output files without asking
+    ]
+    command.extend(ffmpeg_inputs) # Add all input files
+    command.extend([
+        '-filter_complex', ';'.join(filter_graph) if filter_graph else '', # Add the complex filtergraph, handle empty case
+        '-map', f"{final_video_stream}", # Map the final video stream
+        '-map', f"{audio_input_index}:a", # Map audio from the audio_file
+        '-pix_fmt', 'yuv420p', # Add pixel format for wider compatibility
+        '-c:v', video_codec,
+        '-c:a', audio_codec,
+        # '-shortest', # Temporarily remove -shortest to debug video length
+        combined_video_path
+    ])
     
-    # after merging, rename final result to target file name
-    # os.rename(temp_merged_video, combined_video_path)
-    shutil.move(temp_merged_video, combined_video_path)
+    # Handle case where filter_complex is empty (e.g., only one video clip)
+    if not filter_graph:
+        # Reconstruct command for single clip case
+        command = [
+            'ffmpeg',
+            '-y',
+            '-i', processed_clips[0].file_path, # First video input
+            '-i', audio_file, # Audio input
+            '-map', '0:v', # Map video from first input
+            '-map', '1:a', # Map audio from second input (audio_file)
+            '-pix_fmt', 'yuv420p', # Add pixel format for wider compatibility
+            '-c:v', video_codec,
+            '-c:a', audio_codec,
+            # '-shortest', # Temporarily remove -shortest to debug video length
+            combined_video_path
+        ]
 
-    # clean temp files
-    clip_files = [clip.file_path for clip in processed_clips]
-    delete_files(clip_files)
-            
+    logger.info(f"FFmpeg command: {' '.join(command)}")
+
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        logger.success("FFmpeg xfade process completed successfully")
+    except FileNotFoundError:
+        logger.error("Error: 'ffmpeg' not found. Please ensure FFmpeg is installed and in your PATH.")
+        return combined_video_path
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error during FFmpeg execution: {e.stderr}")
+        return combined_video_path
+    finally:
+        # Clean up temporary files
+        clip_files = [clip.file_path for clip in processed_clips]
+        delete_files(clip_files) # Only delete processed clips, not transition clips if they were generated
+
     logger.info("video combining completed")
+    gc.collect() # Perform garbage collection after all operations are done
     return combined_video_path
 
 @utils.timeit
@@ -493,12 +548,12 @@ def generate_video(
     del video_clip
 
 
-def create_zoom_video_rock_solid_smooth(image_path: str, output_path: str, duration: int, fps: int = 30,
+def create_zoom_video_rock_solid_smooth(image_path: str, output_path: str, duration: float, fps: int = 30,
                                         zoom_factor: float = 1.1, target_size: tuple = (1080, 1920)):
     """
     通过预先放大分辨率，创建更平滑的缩放视频。
     """
-    total_frames = duration * fps
+    total_frames = int(duration * fps)
     out_w, out_h = target_size
 
     # 预先将图片放大到 8000 像素宽，以便缩放时更平滑
@@ -572,10 +627,12 @@ def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920)):
             if ext in const.FILE_TYPE_IMAGES:
                 logger.info(f"processing image: {material.url}, {material.duration}")
                 video_file = f"{material.url}.mp4"
+                # Increase duration for image-generated videos to accommodate transitions
+                adjusted_duration = material.duration + DEFAULT_TRANSITION_DURATION
                 success = create_zoom_video_rock_solid_smooth(  # 调用优化后的函数
                     image_path=material.url,
                     output_path=video_file,
-                    duration=material.duration,
+                    duration=adjusted_duration,
                     target_size=target_size
                 )
 
@@ -609,7 +666,6 @@ def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920)):
 if __name__ == '__main__':
     # preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
     combine_videos(combined_video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
-                   video_paths=[f'C:/code/github/MoneyPrinterTurbo/test/combine/temp-clip-{i}.mp4' for i in range(1, 9)],
+                   video_paths=[f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png.mp4' for i in range(8)],
                    audio_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3')
     pass
-
