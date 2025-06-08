@@ -328,7 +328,7 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     )
     return kwargs
 
-
+@utils.timeit
 def start2(task_id, params: TaskVideo2Request):
     logger.info(f"start task: {task_id}")
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
@@ -336,24 +336,7 @@ def start2(task_id, params: TaskVideo2Request):
     if type(params.video_concat_mode) is str:
         params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
 
-    # 1. Generate script
-    # video_script = generate_script(task_id, params)
-    # if not video_script or "Error: " in video_script:
-    #     sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-    #     return
     video_script = " ".join(params.video_script)
-
-    # sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=10)
-    #
-    # # 2. Generate terms
-    # video_terms = ""
-    # if params.video_source != "local":
-    #     video_terms = generate_terms(task_id, params, video_script)
-    #     if not video_terms:
-    #         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-    #         return
-    #
-    # save_script_data(task_id, video_script, video_terms, params)
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=20)
 
@@ -361,13 +344,6 @@ def start2(task_id, params: TaskVideo2Request):
     audio_file, audio_duration, sub_maker = generate_audio(
         task_id, params, video_script
     )
-
-    # t_ad = 0
-    # for i, s in enumerate(params.video_script):
-    #     _, ad, _ = generate_audio(task_id, params, s, prefix=f"part{i+1}")
-    #     params.video_materials[i].duration = ad - 0.3 if ad >= 1 else ad
-    #     t_ad += params.video_materials[i].duration
-    # print('时长测试', audio_duration, t_ad)
 
     if not audio_file:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
@@ -434,41 +410,41 @@ def start2(task_id, params: TaskVideo2Request):
 
 
 if __name__ == "__main__":
-    task_id = "task_id2"
-    params = TaskVideo2Request(
-        video_subject='测试',
-        video_script=["早睡早起精神好，子午小憩不可少。",
-                       "三餐规律营养全，五谷蔬果多尝鲜。",
-                       "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
-                       "每日步行千步走，气血通畅病不有。",
-                       "梳头百遍头不晕，耳常按摩听力稳。",
-                       "冷水洗脸身耐寒，热水泡脚睡眠安。",
-                       "情绪稳定少烦恼，笑口常开疾病跑。",
-                       "日光之下常晒晒，阴阳调和身自在。"],
-        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in range(8)],
-        voice_name="zh-CN-XiaoyiNeural-Female",
-        voice_rate=1.0,
-        video_source="local",
-    )
-    print(start2(task_id, params))
-
-    # task_id = "task_id"
+    # task_id = "task_id2"
     # params = TaskVideo2Request(
     #     video_subject='测试',
-    #     video_script=["今天，我们要去森林里参加派对啦！",
-    #                   "哇，森林里有这么多可爱的小伙伴！",
-    #                   "和小伙伴们一起玩游戏，太开心啦！",
-    #                   "美味的午餐，大家一起分享！",
-    #                   "听，美妙的音乐响起来啦！",
-    #                   "去河边抓小鱼咯！",
-    #                   "篝火旁的时光，温暖又美好！",
-    #                   "今天的派对太难忘啦，下次还要再来！",
-    #                   "再见啦，森林！我们会想你们的！",
-    #                   "把今天的快乐画下来，永远珍藏！", ],
-    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/儿童绘画创作 ({i}).png') for i in
-    #                      range(10)],
+    #     video_script=["早睡早起精神好，子午小憩不可少。",
+    #                    "三餐规律营养全，五谷蔬果多尝鲜。",
+    #                    "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
+    #                    "每日步行千步走，气血通畅病不有。",
+    #                    "梳头百遍头不晕，耳常按摩听力稳。",
+    #                    "冷水洗脸身耐寒，热水泡脚睡眠安。",
+    #                    "情绪稳定少烦恼，笑口常开疾病跑。",
+    #                    "日光之下常晒晒，阴阳调和身自在。"],
+    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in range(8)],
     #     voice_name="zh-CN-XiaoyiNeural-Female",
     #     voice_rate=1.0,
     #     video_source="local",
     # )
     # print(start2(task_id, params))
+
+    task_id = "task_id"
+    params = TaskVideo2Request(
+        video_subject='测试',
+        video_script=["今天，我们要去森林里参加派对啦！",
+                      "哇，森林里有这么多可爱的小伙伴！",
+                      "和小伙伴们一起玩游戏，太开心啦！",
+                      "美味的午餐，大家一起分享！",
+                      "听，美妙的音乐响起来啦！",
+                      "去河边抓小鱼咯！",
+                      "篝火旁的时光，温暖又美好！",
+                      "今天的派对太难忘啦，下次还要再来！",
+                      "再见啦，森林！我们会想你们的！",
+                      "把今天的快乐画下来，永远珍藏！", ],
+        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/儿童绘画创作 ({i}).png') for i in
+                         range(10)],
+        voice_name="zh-CN-XiaoyiNeural-Female",
+        voice_rate=1.0,
+        video_source="local",
+    )
+    print(start2(task_id, params))
