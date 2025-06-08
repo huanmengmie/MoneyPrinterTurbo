@@ -1,14 +1,17 @@
 import math
 import os.path
+import random
 import re
+import requests
 from os import path
 from pathlib import Path
+from urllib.parse import urlparse
 
 from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import VideoConcatMode, VideoParams, TaskVideo2Request, MaterialInfo
+from app.models.schema import VideoConcatMode, VideoParams, TaskVideo2Request, MaterialInfo, VideoAspect
 from app.services import llm, material, subtitle, video, voice
 from app.services import state as sm
 from app.services.srt import calculate_durations, match_subtitles_to_scripts
@@ -128,8 +131,34 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
 def get_video_materials(task_id, params, video_terms, audio_duration):
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
+        materials_dir = Path(utils.task_dir(task_id)) / "materials"
+        materials_dir.mkdir(parents=True, exist_ok=True)
+
+        for index, material_info in enumerate(params.video_materials):
+            url = material_info.url
+            parsed_url = urlparse(url)
+            if parsed_url.scheme in ["http", "https"]:
+                try:
+                    file_name = f'{index}.jpeg'
+                    local_path = materials_dir / file_name
+                    logger.info(f"downloading {url} to {local_path}")
+                    response = requests.get(url, stream=True)
+                    response.raise_for_status()
+                    with open(local_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    material_info.url = str(local_path)
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"failed to download {url}: {e}")
+                    sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+                    return None
+
+        aspect = VideoAspect(params.video_aspect)
+
         materials = video.preprocess_video(
-            materials=params.video_materials
+            materials=params.video_materials,
+            target_size=aspect.to_resolution(),
+            zoom_factor=params.video_zoom_factor,
         )
         if not materials:
             sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
@@ -428,21 +457,36 @@ if __name__ == "__main__":
     # )
     # print(start2(task_id, params))
 
-    task_id = "task_id"
+    # task_id = "task_id"
+    # params = TaskVideo2Request(
+    #     video_subject='测试',
+    #     video_script=["今天，我们要去森林里参加派对啦！",
+    #                   "哇，森林里有这么多可爱的小伙伴！",
+    #                   "和小伙伴们一起玩游戏，太开心啦！",
+    #                   "美味的午餐，大家一起分享！",
+    #                   "听，美妙的音乐响起来啦！",
+    #                   "去河边抓小鱼咯！",
+    #                   "篝火旁的时光，温暖又美好！",
+    #                   "今天的派对太难忘啦，下次还要再来！",
+    #                   "再见啦，森林！我们会想你们的！",
+    #                   "把今天的快乐画下来，永远珍藏！", ],
+    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/儿童绘画创作 ({i}).png') for i in
+    #                      range(10)],
+    #     voice_name="zh-CN-XiaoyiNeural-Female",
+    #     voice_rate=1.0,
+    #     video_source="local",
+    # )
+    # print(start2(task_id, params))
+
+    task_id = "task_id3"
     params = TaskVideo2Request(
         video_subject='测试',
-        video_script=["今天，我们要去森林里参加派对啦！",
-                      "哇，森林里有这么多可爱的小伙伴！",
-                      "和小伙伴们一起玩游戏，太开心啦！",
-                      "美味的午餐，大家一起分享！",
-                      "听，美妙的音乐响起来啦！",
-                      "去河边抓小鱼咯！",
-                      "篝火旁的时光，温暖又美好！",
-                      "今天的派对太难忘啦，下次还要再来！",
-                      "再见啦，森林！我们会想你们的！",
-                      "把今天的快乐画下来，永远珍藏！", ],
-        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/儿童绘画创作 ({i}).png') for i in
-                         range(10)],
+        video_script= ["deepseek说，当你感到焦虑不安，对工作提不起兴致的时候，就去读《午夜图书馆》。",
+                       "学习的唯一途径就是生活。",
+                       "在生与死之间，有一座图书馆。在这座图书馆里，书架绵延不绝。每一本书都提供了一次尝试另一种你可能活过的生活的机会。去看看如果你做了其他的选择，事情会变成怎样……如果你有机会消除你的遗憾，你会做些什么不同的事？",
+                       "你不必理解生活。你只需要去过它。"],
+        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/61d05c47-d99c-49aa-8ec3-cc96d4c009e2/materials/{i}.jpeg') for
+                         i in range(4)],
         voice_name="zh-CN-XiaoyiNeural-Female",
         voice_rate=1.0,
         video_source="local",

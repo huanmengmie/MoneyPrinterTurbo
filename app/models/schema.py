@@ -71,20 +71,20 @@ class VideoParams(BaseModel):
     video_subject: str
     video_script: str = ""  # Script used to generate the video
     video_terms: Optional[str | list] = None  # Keywords used to generate the video
-    video_aspect: Optional[VideoAspect] = VideoAspect.portrait.value
+    video_aspect: Optional[VideoAspect] = VideoAspect.landscape.value
     video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.random.value
     video_transition_mode: Optional[VideoTransitionMode] = None
     video_clip_duration: Optional[int] = 5
     video_count: Optional[int] = 1
 
-    video_source: Optional[str] = "pexels"
+    video_source: Optional[str] = "local"
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
 
     video_language: Optional[str] = ""  # auto detect
 
-    voice_name: Optional[str] = ""
+    voice_name: Optional[str] = "zh-CN-XiaoyiNeural-Female"
     voice_volume: Optional[float] = 1.0
     voice_rate: Optional[float] = 1.0
     bgm_type: Optional[str] = "random"
@@ -181,6 +181,7 @@ class TaskVideo2Request(VideoParams, BaseModel):
     video_script: list[str]
     video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.sequential
     video_transition_mode: Optional[VideoTransitionMode] = VideoTransitionMode.fade_in
+    video_zoom_factor: float = 1.1
     pass
 
 class TaskQueryRequest(BaseModel):

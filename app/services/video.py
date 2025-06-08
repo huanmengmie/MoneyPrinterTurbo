@@ -502,7 +502,7 @@ def create_zoom_video_rock_solid_smooth(image_path: str, output_path: str, durat
 
 
 @utils.timeit
-def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920)):
+def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920), zoom_factor=1.1):
     for material in materials:
         if not material.url:
             continue
@@ -528,7 +528,8 @@ def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920)):
                     image_path=material.url,
                     output_path=video_file,
                     duration=adjusted_duration,
-                    target_size=target_size
+                    target_size=target_size,
+                    zoom_factor=zoom_factor,
                 )
 
                 if success:
@@ -684,31 +685,31 @@ def generate_video(
     del video_clip
 
 if __name__ == '__main__':
-    # preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
+    preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
     # combine_videos(combined_video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
     #                video_paths=[f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png.mp4' for i in range(8)],
     #                audio_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3')
 
-    params = TaskVideo2Request(
-        video_subject='测试',
-        video_script=["早睡早起精神好，子午小憩不可少。",
-                      "三餐规律营养全，五谷蔬果多尝鲜。",
-                      "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
-                      "每日步行千步走，气血通畅病不有。",
-                      "梳头百遍头不晕，耳常按摩听力稳。",
-                      "冷水洗脸身耐寒，热水泡脚睡眠安。",
-                      "情绪稳定少烦恼，笑口常开疾病跑。",
-                      "日光之下常晒晒，阴阳调和身自在。"],
-        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in
-                         range(8)],
-        voice_name="zh-CN-XiaoyiNeural-Female",
-        voice_rate=1.0,
-        video_source="local",
-    )
-
-    generate_video(video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
-                   audio_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3',
-                   subtitle_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\subtitle.srt',
-                   output_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\final.mp4',
-                   params=params)
+    # params = TaskVideo2Request(
+    #     video_subject='测试',
+    #     video_script=["早睡早起精神好，子午小憩不可少。",
+    #                   "三餐规律营养全，五谷蔬果多尝鲜。",
+    #                   "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
+    #                   "每日步行千步走，气血通畅病不有。",
+    #                   "梳头百遍头不晕，耳常按摩听力稳。",
+    #                   "冷水洗脸身耐寒，热水泡脚睡眠安。",
+    #                   "情绪稳定少烦恼，笑口常开疾病跑。",
+    #                   "日光之下常晒晒，阴阳调和身自在。"],
+    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in
+    #                      range(8)],
+    #     voice_name="zh-CN-XiaoyiNeural-Female",
+    #     voice_rate=1.0,
+    #     video_source="local",
+    # )
+    #
+    # generate_video(video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
+    #                audio_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3',
+    #                subtitle_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\subtitle.srt',
+    #                output_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\final.mp4',
+    #                params=params)
     pass

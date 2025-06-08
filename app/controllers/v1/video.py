@@ -165,7 +165,7 @@ def get_task(
             urls = []
             for v in videos:
                 urls.append(file_to_uri(v))
-            task["videos"] = urls
+            task["video_urls"] = urls
         if "combined_videos" in task:
             combined_videos = task["combined_videos"]
             urls = []
