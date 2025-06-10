@@ -487,7 +487,7 @@ if __name__ == "__main__":
                        "你不必理解生活。你只需要去过它。"],
         video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/61d05c47-d99c-49aa-8ec3-cc96d4c009e2/materials/{i}.jpeg') for
                          i in range(4)],
-        voice_name="zh-CN-XiaoyiNeural-Female",
+        voice_name="zh-CN-XiaochenNeural-Female-V2",
         voice_rate=1.0,
         video_source="local",
     )

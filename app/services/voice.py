@@ -1076,7 +1076,7 @@ def is_siliconflow_voice(voice_name: str):
     """检查是否是硅基流动的声音"""
     return voice_name.startswith("siliconflow:")
 
-
+@utils.timeit
 def tts(
     text: str,
     voice_name: str,
@@ -1290,6 +1290,11 @@ def siliconflow_tts(
 
 
 def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker, None]:
+    """
+    https://learn.microsoft.com/zh-cn/azure/ai-services/speech-service/how-to-speech-synthesis?tabs=browserjs%2Cterminal&pivots=programming-language-python
+    attention:
+    1. 带有Flash的模型不要用，因为没有办法去订阅事件，无法通过WordBoundary事件获取字幕
+    """
     voice_name = is_azure_v2_voice(voice_name)
     if not voice_name:
         logger.error(f"invalid voice name: {voice_name}")
@@ -1320,19 +1325,29 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker,
 
             sub_maker = SubMaker()
 
-            def speech_synthesizer_word_boundary_cb(evt: speechsdk.SessionEventArgs):
+            def speech_synthesizer_word_boundary_cb(evt: speechsdk.SpeechSynthesisWordBoundaryEventArgs):
                 # print('WordBoundary event:')
-                # print('\tBoundaryType: {}'.format(evt.boundary_type))
-                # print('\tAudioOffset: {}ms'.format((evt.audio_offset + 5000)))
-                # print('\tDuration: {}'.format(evt.duration))
-                # print('\tText: {}'.format(evt.text))
-                # print('\tTextOffset: {}'.format(evt.text_offset))
-                # print('\tWordLength: {}'.format(evt.word_length))
+                # print(f'\tAudioOffset: {evt.audio_offset} ticks ({(evt.audio_offset // 10000)}ms)')
+                # print(f'\tDuration: {evt.duration} ticks ({(evt.duration // 10000)}ms)')
+                # print(f'\tText: "{evt.text}"')
+                # print(f'\tTextOffset: {evt.text_offset}')
+                # print(f'\tWordLength: {evt.word_length}')
+                # print(f'\tBoundaryType: {evt.boundary_type}')  # e.g., WordBoundaryType.Word
 
-                duration = _format_duration_to_offset(str(evt.duration))
-                offset = _format_duration_to_offset(evt.audio_offset)
-                sub_maker.subs.append(evt.text)
-                sub_maker.offset.append((offset, offset + duration))
+                if evt.boundary_type == speechsdk.SpeechSynthesisBoundaryType.Word:
+                    # Using our dummy _format_duration_to_offset which expects ticks
+                    duration_ms = _format_duration_to_offset(str(evt.duration))
+                    offset_ms = _format_duration_to_offset(evt.audio_offset)
+
+                    # Add 5000ms (5s) delay example, as in your commented out line.
+                    # This is useful if you are concatenating audio or have a preamble.
+                    # For a simple file, you might not need this.
+                    # offset_ms_adjusted = offset_ms + 5000
+                    # logger.info(f"Sentence: {evt.text}, duration: {duration_ms}ms, offset: {offset_ms}ms")
+                    sub_maker.subs.append(evt.text)
+                    sub_maker.offset.append((offset_ms, offset_ms + duration_ms))
+                elif evt.boundary_type == speechsdk.SpeechSynthesisBoundaryType.Sentence:
+                    logger.info(f'\tDuration: {evt.duration}')
 
             # Creates an instance of a speech config with specified subscription key and service region.
             speech_key = config.azure.get("speech_key", "")
@@ -1341,31 +1356,24 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker,
                 logger.error("Azure speech key or region is not set")
                 return None
 
-            audio_config = speechsdk.audio.AudioOutputConfig(
-                filename=voice_file, use_default_speaker=True
-            )
-            speech_config = speechsdk.SpeechConfig(
-                subscription=speech_key, region=service_region
-            )
+            speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
+            # The language of the voice that speaks.
             speech_config.speech_synthesis_voice_name = voice_name
-            # speech_config.set_property(property_id=speechsdk.PropertyId.SpeechServiceResponse_RequestSentenceBoundary,
-            #                            value='true')
-            speech_config.set_property(
-                property_id=speechsdk.PropertyId.SpeechServiceResponse_RequestWordBoundary,
-                value="true",
-            )
-
             speech_config.set_speech_synthesis_output_format(
                 speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3
             )
-            speech_synthesizer = speechsdk.SpeechSynthesizer(
-                audio_config=audio_config, speech_config=speech_config
-            )
-            speech_synthesizer.synthesis_word_boundary.connect(
-                speech_synthesizer_word_boundary_cb
-            )
+            # Required for WordBoundary event sentences.
+            speech_config.set_property(property_id=speechsdk.PropertyId.SpeechServiceResponse_RequestSentenceBoundary,
+                                       value='true')
+
+            audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True, filename=voice_file)
+            speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+
+            # Subscribe to events
+            speech_synthesizer.synthesis_word_boundary.connect(speech_synthesizer_word_boundary_cb)
 
             result = speech_synthesizer.speak_text_async(text).get()
+
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 logger.success(f"azure v2 speech synthesis succeeded: {voice_file}")
                 return sub_maker
@@ -1378,7 +1386,10 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker,
                     logger.error(
                         f"azure v2 speech synthesis error: {cancellation_details.error_details}"
                     )
-            logger.info(f"completed, output file: {voice_file}")
+            else:
+                logger.info(
+                    f"azure v2 speech synthesis failed: {result.reason}"
+                )
         except Exception as e:
             logger.error(f"failed, error: {str(e)}")
     return None
@@ -1518,25 +1529,20 @@ if __name__ == "__main__":
         # "zh-CN-shaanxi-XiaoniNeural-Female",
         ## v2 女生
         # "zh-CN-XiaohanNeural-Female-V2",
-        # "zh-CN-Xiaochen:DragonHDFlashLatestNeural-Female-V2",
         # "zh-CN-XiaomoNeural-Female-V2",
         # "zh-CN-XiaorouNeural-Female-V2",
-        # "zh-CN-Xiaoxiao:DragonHDFlashLatestNeural-Female-V2",
         # "zh-CN-Xiaochen:DragonHDLatestNeural-Female-V2",
         # "zh-CN-XiaoxiaoNeural-Female-V2",
-        # "zh-CN-XiaochenNeural-Female-V2",
-        # "zh-CN-Xiaoxiao2:DragonHDFlashLatestNeural-Female-V2",
+        "zh-CN-XiaochenNeural-Female-V2",
 
         ## V2 男生
-        "zh-CN-YunyeNeural-Male-V2",
-        "zh-CN-YunhaoNeural-Male-V2",
-        "zh-CN-YunzeNeural-Male-V2",
-        "zh-CN-Yunxiao:DragonHDFlashLatestNeural-Male-V2",
-        "zh-CN-Yunyi:DragonHDFlashLatestNeural-Male-V2",
+        # "zh-CN-YunyeNeural-Male-V2",
+        # "zh-CN-YunhaoNeural-Male-V2",
+        # "zh-CN-YunzeNeural-Male-V2",
 
     ]
 
-    text = "静夜思是唐代诗人李白创作的一首五言古诗。这首诗描绘了诗人在寂静的夜晚，看到窗前的明月，不禁想起远方的家乡和亲人"
+    text = "静夜思是唐代诗人李白创作的一首五言古诗。这首诗描绘了诗人在寂静的夜晚，看到窗前的明月，不禁想起远方的家乡和亲人,"
 
     text = _format_text(text)
     lines = utils.split_string_by_punctuations(text)
@@ -1544,12 +1550,12 @@ if __name__ == "__main__":
 
     for voice_name in voice_names:
         save_name = voice_name.replace(':', '-')
-        voice_file = f"{temp_dir}/2M-tts-{save_name}.mp3"
-        subtitle_file = f"{temp_dir}/tts.mp3.srt"
+        voice_file = f"{temp_dir}/{save_name[:30]}.mp3"
+        subtitle_file = f"{temp_dir}/{save_name}.srt"
         sub_maker = tts(
             text=text, voice_name=voice_name, voice_rate=1.0, voice_file=voice_file
         )
-        # create_subtitle(sub_maker=sub_maker, text=text, subtitle_file=subtitle_file)
+        create_subtitle(sub_maker=sub_maker, text=text, subtitle_file=subtitle_file)
         audio_duration = get_audio_duration(sub_maker)
         print(f"voice: {voice_name}, audio duration: {audio_duration}s")
 
