@@ -86,7 +86,7 @@ class VideoParams(BaseModel):
 
     voice_name: Optional[str] = "zh-CN-XiaoyiNeural-Female"
     voice_volume: Optional[float] = 1.0
-    voice_rate: Optional[float] = 1.0
+    voice_rate: Optional[float] = 1.1
     bgm_type: Optional[str] = "random"
     bgm_file: Optional[str] = ""
     bgm_volume: Optional[float] = 0.2

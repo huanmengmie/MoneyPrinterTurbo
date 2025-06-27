@@ -1084,8 +1084,9 @@ def tts(
     voice_file: str,
     voice_volume: float = 1.0,
 ) -> Union[SubMaker, None]:
+    text = text.replace("·", "")
     if is_azure_v2_voice(voice_name):
-        return azure_tts_v2(text, voice_name, voice_file)
+        return azure_tts_v2(text, voice_name, voice_file, voice_rate)
     elif is_siliconflow_voice(voice_name):
         # 从voice_name中提取模型和声音
         # 格式: siliconflow:model:voice-Gender
@@ -1289,7 +1290,7 @@ def siliconflow_tts(
     return None
 
 
-def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker, None]:
+def azure_tts_v2(text: str, voice_name: str, voice_file: str, voice_rate: float = 1.0) -> Union[SubMaker, None]:
     """
     https://learn.microsoft.com/zh-cn/azure/ai-services/speech-service/how-to-speech-synthesis?tabs=browserjs%2Cterminal&pivots=programming-language-python
     attention:
@@ -1365,6 +1366,8 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker,
             # Required for WordBoundary event sentences.
             speech_config.set_property(property_id=speechsdk.PropertyId.SpeechServiceResponse_RequestSentenceBoundary,
                                        value='true')
+            speech_config.set_property(property_id=speechsdk.PropertyId.SpeechServiceResponse_StablePartialResultThreshold,
+                                       value='10000')
 
             audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True, filename=voice_file)
             speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
@@ -1372,7 +1375,19 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker,
             # Subscribe to events
             speech_synthesizer.synthesis_word_boundary.connect(speech_synthesizer_word_boundary_cb)
 
-            result = speech_synthesizer.speak_text_async(text).get()
+            rate = f'{"+" if voice_rate > 1.0 else "-"}{int(abs((voice_rate - 1.0) * 100))}%'
+            print(f"voice rate: {rate}")
+            ssml_fast = f"""
+            <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
+                <voice name="{speech_config.speech_synthesis_voice_name}">
+                    <prosody rate="{rate}">
+                        {text}
+                    </prosody>
+                </voice>
+            </speak>
+            """
+            result = speech_synthesizer.speak_ssml_async(ssml_fast).get()
+            # result = speech_synthesizer.speak_text_async(ssml_fast).get()
 
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 logger.success(f"azure v2 speech synthesis succeeded: {voice_file}")
@@ -1534,6 +1549,7 @@ if __name__ == "__main__":
         # "zh-CN-Xiaochen:DragonHDLatestNeural-Female-V2",
         # "zh-CN-XiaoxiaoNeural-Female-V2",
         "zh-CN-XiaochenNeural-Female-V2",
+        # "zh-CN-XiaochenMultilingualNeural-Female-V2",
 
         ## V2 男生
         # "zh-CN-YunyeNeural-Male-V2",
@@ -1542,7 +1558,7 @@ if __name__ == "__main__":
 
     ]
 
-    text = "静夜思是唐代诗人李白创作的一首五言古诗。这首诗描绘了诗人在寂静的夜晚，看到窗前的明月，不禁想起远方的家乡和亲人,"
+    text = """你有没有想过，你所有的不快乐，都不是因为“过去”，而是你“现在”的一个选择？这个观点，听起来是不是有点反常识，甚至刺耳？我们很多人，穷其一生都在努力扮演“好孩子”、“好员工”、“好伴侣”。我们小心翼翼地活在别人的目光里，总怕说错话、做错事，被贴上标签，被指指点点。结果呢？活得战战兢兢，小心翼翼，却还是觉得处处不顺心，甚至把一切不顺归咎于原生家庭、过去的经历？"""
 
     text = _format_text(text)
     lines = utils.split_string_by_punctuations(text)
@@ -1550,10 +1566,10 @@ if __name__ == "__main__":
 
     for voice_name in voice_names:
         save_name = voice_name.replace(':', '-')
-        voice_file = f"{temp_dir}/{save_name[:30]}.mp3"
+        voice_file = f"{temp_dir}/{save_name}.mp3"
         subtitle_file = f"{temp_dir}/{save_name}.srt"
         sub_maker = tts(
-            text=text, voice_name=voice_name, voice_rate=1.0, voice_file=voice_file
+            text=text, voice_name=voice_name, voice_rate=1.2, voice_file=voice_file
         )
         create_subtitle(sub_maker=sub_maker, text=text, subtitle_file=subtitle_file)
         audio_duration = get_audio_duration(sub_maker)
