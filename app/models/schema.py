@@ -92,15 +92,15 @@ class VideoParams(BaseModel):
     bgm_volume: Optional[float] = 0.2
 
     subtitle_enabled: Optional[bool] = True
-    subtitle_position: Optional[str] = "bottom"  # top, bottom, center
+    subtitle_position: Optional[str] = "center"  # top, bottom, center
     custom_position: float = 70.0
-    font_name: Optional[str] = "MicrosoftYaHeiNormal.ttc"
-    text_fore_color: Optional[str] = "#FFFFFF"
+    font_name: Optional[str] = "AaZhuNiWoMingMeiXiangChunTian.ttf"
+    text_fore_color: Optional[str] = "#ff0000"
     text_background_color: Union[bool, str] = True
 
-    font_size: int = 60
-    stroke_color: Optional[str] = "#000000"
-    stroke_width: float = 1.5
+    font_size: int = 90
+    stroke_color: Optional[str] = "#FFD700"
+    stroke_width: float = 2
     n_threads: Optional[int] = 8
     paragraph_number: Optional[int] = 1
 
@@ -180,7 +180,7 @@ class TaskVideoRequest(VideoParams, BaseModel):
 class TaskVideo2Request(VideoParams, BaseModel):
     video_script: list[str]
     video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.sequential
-    video_transition_mode: Optional[VideoTransitionMode] = VideoTransitionMode.fade_in
+    video_transition_mode: Optional[VideoTransitionMode] = VideoTransitionMode.shuffle
     video_zoom_factor: float = 1.1
     pass
 

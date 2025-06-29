@@ -1,5 +1,6 @@
 import gc
 import glob
+import math
 import os
 import random
 import subprocess
@@ -7,7 +8,8 @@ import time
 import traceback
 from typing import List
 
-from PIL import ImageFont
+import numpy as np
+from PIL import ImageFont, Image
 from loguru import logger
 from moviepy import (
     AudioFileClip,
@@ -18,7 +20,7 @@ from moviepy import (
     TextClip,
     VideoFileClip,
     afx,
-    concatenate_videoclips,
+    concatenate_videoclips, VideoClip,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 
@@ -559,18 +561,16 @@ def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920), zo
             traceback.print_exc()
     return materials
 
-
 @utils.timeit
-def generate_video(
-    video_path: str,
-    audio_path: str,
-    subtitle_path: str,
-    output_file: str,
-    params: VideoParams,
+def generate_video1(
+video_path: str,
+audio_path: str,
+subtitle_path: str,
+output_file: str,
+params: VideoParams,
 ):
     aspect = VideoAspect(params.video_aspect)
     video_width, video_height = aspect.to_resolution()
-
     logger.info(f"generating video: {video_width} x {video_height}")
     logger.info(f"  ① video: {video_path}")
     logger.info(f"  ② audio: {audio_path}")
@@ -684,32 +684,198 @@ def generate_video(
     video_clip.close()
     del video_clip
 
+@utils.timeit
+def generate_video(
+    video_path: str,
+    audio_path: str,
+    subtitle_path: str,
+    output_file: str,
+    params: VideoParams,
+):
+    aspect = VideoAspect(params.video_aspect)
+    video_width, video_height = aspect.to_resolution()
+
+    logger.info(f"generating video: {video_width} x {video_height}")
+    logger.info(f"  ① video: {video_path}")
+    logger.info(f"  ② audio: {audio_path}")
+    logger.info(f"  ③ subtitle: {subtitle_path}")
+    logger.info(f"  ④ output: {output_file}")
+
+    # https://github.com/harry0703/MoneyPrinterTurbo/issues/217
+    # PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'final-1.mp4.tempTEMP_MPY_wvf_snd.mp3'
+    # write into the same directory as the output file
+    output_dir = os.path.dirname(output_file)
+
+    font_path = ""
+    if params.subtitle_enabled:
+        if not params.font_name:
+            params.font_name = "STHeitiMedium.ttc"
+        font_path = os.path.join(utils.font_dir(), params.font_name)
+        if os.name == "nt":
+            font_path = font_path.replace("\\", "/")
+
+        logger.info(f"  ⑤ font: {font_path}")
+
+    def create_text_clip(subtitle_item):
+        start_time, end_time = subtitle_item[0]
+        phrase = subtitle_item[1]
+        duration = end_time - start_time
+
+        params.font_size = int(params.font_size)
+        params.stroke_width = int(params.stroke_width)
+
+        # 文本自动换行
+        max_width = video_width * 0.9
+        wrapped_txt, _ = wrap_text(
+            phrase, max_width=max_width, font=font_path, fontsize=params.font_size
+        )
+
+        # 关键步骤 1: 先生成一个包含完整文本的剪辑，以确定其最终的尺寸
+        # 这可以防止字幕因文字增多而抖动
+        full_text_clip = TextClip(
+            text=wrapped_txt,
+            font=font_path,
+            font_size=params.font_size,
+            color=params.text_fore_color,
+            stroke_color=params.stroke_color,
+            stroke_width=params.stroke_width,
+            bg_color=(0, 0, 0, 0),
+            transparent=True,
+            text_align='left'  # 或 'center'，根据你的需要
+        )
+        text_width, text_height = full_text_clip.size
+
+        # 关键步骤 2: 定义一个函数，用于为动画的每一帧生成图像
+        def make_frame(t):
+            # t 是从0到duration的当前时间
+            # 计算当前应该显示的字符数
+
+            num_chars = math.ceil(len(wrapped_txt) * (t / duration))
+            # 考虑到多行文本，我们需要正确截取
+            current_text = wrapped_txt[:num_chars]
+            # 创建当前帧的文本剪辑
+            frame_clip = TextClip(
+                text=current_text,
+                font=font_path,
+                font_size=params.font_size,
+                color=params.text_fore_color,
+                bg_color=params.text_background_color,
+                transparent=True,
+                stroke_color=params.stroke_color,
+                stroke_width=params.stroke_width,
+            )
+
+            im = frame_clip.get_frame(0)
+            mask = 255 * frame_clip.mask.get_frame(t)
+            im = np.dstack([im, mask]).astype("uint8")
+            return im
+
+        # 关键步骤 3: 使用 VideoClip 和 make_frame 创建动画剪辑
+        animated_clip = VideoClip(make_frame, duration=duration)
+
+        # 设置剪辑的开始时间和位置
+        animated_clip = animated_clip.with_start(start_time)
+
+        # 定位逻辑保持不变
+        if params.subtitle_position == "bottom":
+            animated_clip = animated_clip.with_position(("center", video_height * 0.95 - text_height))
+        elif params.subtitle_position == "top":
+            animated_clip = animated_clip.with_position(("center", video_height * 0.05))
+        elif params.subtitle_position == "custom":
+            margin = 10
+            max_y = video_height - text_height - margin
+            min_y = margin
+            custom_y = (video_height - text_height) * (params.custom_position / 100)
+            custom_y = max(min_y, min(custom_y, max_y))
+            animated_clip = animated_clip.with_position(("center", custom_y))
+        else:  # center
+            animated_clip = animated_clip.with_position(("center", "center"))
+
+        return animated_clip
+
+    video_clip = VideoFileClip(video_path).without_audio()
+    audio_clip = AudioFileClip(audio_path).with_effects(
+        [afx.MultiplyVolume(params.voice_volume)]
+    )
+
+    def make_textclip(text):
+        return TextClip(
+            text=text,
+            font=font_path,
+            font_size=params.font_size,
+        )
+
+    if subtitle_path and os.path.exists(subtitle_path):
+        sub = SubtitlesClip(
+            subtitles=subtitle_path, encoding="utf-8", make_textclip=make_textclip
+        )
+        text_clips = []
+        for item in sub.subtitles:
+            clip = create_text_clip(subtitle_item=item)
+            text_clips.append(clip)
+        video_clip = CompositeVideoClip([video_clip, *text_clips])
+
+    bgm_file = get_bgm_file(bgm_type=params.bgm_type, bgm_file=params.bgm_file)
+    if bgm_file:
+        try:
+            bgm_clip = AudioFileClip(bgm_file).with_effects(
+                [
+                    afx.MultiplyVolume(params.bgm_volume),
+                    afx.AudioFadeOut(3),
+                    afx.AudioLoop(duration=video_clip.duration),
+                ]
+            )
+            audio_clip = CompositeAudioClip([audio_clip, bgm_clip])
+        except Exception as e:
+            logger.error(f"failed to add bgm: {str(e)}")
+
+    video_clip = video_clip.with_audio(audio_clip)
+    video_clip.write_videofile(
+        output_file,
+        audio_codec=audio_codec,
+        temp_audiofile_path=output_dir,
+        threads=params.n_threads or 8,
+        logger='bar',  # 显示进度条
+        fps=fps,
+    )
+    video_clip.close()
+    del video_clip
+
 if __name__ == '__main__':
-    preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
+    # preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
     # combine_videos(combined_video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
     #                video_paths=[f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png.mp4' for i in range(8)],
     #                audio_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3')
+    video_script = ["这片海，吞噬过无数的船，却从没能吞噬一个真正的灵魂。",
+                    "海明威用《老人与海》告诉我们，人可以被毁灭，但不能被打败。",]
+    task_id = "task_id3"
+    params = TaskVideo2Request(
+        video_subject='测试',
+        video_script=video_script,
+        video_materials=[MaterialInfo(
+            url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/materials/{i}.jpeg')
+                         for
+                         i in range(len(video_script))],
+        voice_name="zh-CN-XiaochenNeural-Female-V2",
+        voice_rate=1.0,
+        video_source="local",
+        video_transition_mode=VideoTransitionMode.shuffle,
+        subtitle_position='center',
+        font_name='AaZhuNiWoMingMeiXiangChunTian.ttf',
+        font_size=90,
+        text_fore_color="#ff0000",
+        text_background_color=True,
+        stroke_color="#FFD700",
+        stroke_width=2,
+    )
+    # print(start2(task_id, params))
 
-    # params = TaskVideo2Request(
-    #     video_subject='测试',
-    #     video_script=["早睡早起精神好，子午小憩不可少。",
-    #                   "三餐规律营养全，五谷蔬果多尝鲜。",
-    #                   "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
-    #                   "每日步行千步走，气血通畅病不有。",
-    #                   "梳头百遍头不晕，耳常按摩听力稳。",
-    #                   "冷水洗脸身耐寒，热水泡脚睡眠安。",
-    #                   "情绪稳定少烦恼，笑口常开疾病跑。",
-    #                   "日光之下常晒晒，阴阳调和身自在。"],
-    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in
-    #                      range(8)],
-    #     voice_name="zh-CN-XiaoyiNeural-Female",
-    #     voice_rate=1.0,
-    #     video_source="local",
-    # )
-    #
-    # generate_video(video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
-    #                audio_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3',
-    #                subtitle_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\subtitle.srt',
-    #                output_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\final.mp4',
-    #                params=params)
+    # 合成最终视频
+    generate_video(
+        video_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/combined-1.mp4",
+        audio_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/all_audio.mp3",
+        subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/subtitle.srt",
+        output_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/output.mp4",
+        params=params,
+    )
     pass
