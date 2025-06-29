@@ -11,7 +11,8 @@ from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import VideoConcatMode, VideoParams, TaskVideo2Request, MaterialInfo, VideoAspect
+from app.models.schema import VideoConcatMode, VideoParams, TaskVideo2Request, MaterialInfo, VideoAspect, \
+    VideoTransitionMode
 from app.services import llm, material, subtitle, video, voice
 from app.services import state as sm
 from app.services.srt import calculate_durations, match_subtitles_to_scripts
@@ -439,23 +440,6 @@ def start2(task_id, params: TaskVideo2Request):
 
 
 if __name__ == "__main__":
-    # task_id = "task_id2"
-    # params = TaskVideo2Request(
-    #     video_subject='测试',
-    #     video_script=["早睡早起精神好，子午小憩不可少。",
-    #                    "三餐规律营养全，五谷蔬果多尝鲜。",
-    #                    "常饮热茶驱寒气，蜂蜜枸杞润肺脾。",
-    #                    "每日步行千步走，气血通畅病不有。",
-    #                    "梳头百遍头不晕，耳常按摩听力稳。",
-    #                    "冷水洗脸身耐寒，热水泡脚睡眠安。",
-    #                    "情绪稳定少烦恼，笑口常开疾病跑。",
-    #                    "日光之下常晒晒，阴阳调和身自在。"],
-    #     video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png') for i in range(8)],
-    #     voice_name="zh-CN-XiaoyiNeural-Female",
-    #     voice_rate=1.0,
-    #     video_source="local",
-    # )
-    # print(start2(task_id, params))
 
     # task_id = "task_id"
     # params = TaskVideo2Request(
@@ -477,18 +461,49 @@ if __name__ == "__main__":
     #     video_source="local",
     # )
     # print(start2(task_id, params))
+    video_script = ["这片海，吞噬过无数的船，却从没能吞噬一个真正的灵魂。",
+                    "海明威用《老人与海》告诉我们，人可以被毁灭，但不能被打败。",
+                    # "真正的胜利，不是征服了什么，而是你经历了什么，又如何站立。",
+                    # "即使只剩一副骨架，那也是荣耀的勋章，是与命运搏斗的见证。",
+                    # "孤独是每个勇士的必修课，而信念，是那漫长航程中唯一的星光。",
+                    # "敬那些不肯向生活低头的人，你的海上，永不落幕。",
+                    ]
 
     task_id = "task_id3"
     params = TaskVideo2Request(
         video_subject='测试',
-        video_script= ["deepseek说，当你感到焦虑不安，对工作提不起兴致的时候，就去读《午夜图书馆》。",
-                       "学习的唯一途径就是生活。",
-                       "在生与死之间，有一座图书馆。在这座图书馆里，书架绵延不绝。每一本书都提供了一次尝试另一种你可能活过的生活的机会。去看看如果你做了其他的选择，事情会变成怎样……如果你有机会消除你的遗憾，你会做些什么不同的事？",
-                       "你不必理解生活。你只需要去过它。"],
-        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/61d05c47-d99c-49aa-8ec3-cc96d4c009e2/materials/{i}.jpeg') for
-                         i in range(4)],
+        video_script=video_script,
+        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/materials/{i}.jpeg') for
+                         i in range(len(video_script))],
         voice_name="zh-CN-XiaochenNeural-Female-V2",
         voice_rate=1.0,
         video_source="local",
+        video_transition_mode=VideoTransitionMode.shuffle,
+        subtitle_position='center',
+        font_name='AaZhuNiWoMingMeiXiangChunTian.ttf',
+        font_size=80,
+        text_fore_color= "#ff0000",
+        text_background_color= True,
+        stroke_color= "#0000ff",
+        stroke_width = 2,
     )
-    print(start2(task_id, params))
+    # print(start2(task_id, params))
+
+    # 拼接视频 + 合成最终视频（添加字幕、bgm）
+    # generate_final_videos(
+    #     task_id=task_id,
+    #     params=params,
+    #     downloaded_videos=[f'C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/materials/{i}.jpeg.mp4' for
+    #         i in range(len(video_script))],
+    #     audio_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/all_audio.mp3",
+    #     subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/subtitle.srt",
+    # )
+
+    # 合成最终视频
+    video.generate_video(
+        video_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/combined-1.mp4",
+        audio_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/all_audio.mp3",
+        subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/subtitle.srt",
+        output_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/output.mp4",
+        params=params,
+    )

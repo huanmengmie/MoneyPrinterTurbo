@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import time
 from datetime import datetime
 from typing import Union
 from xml.sax.saxutils import unescape
@@ -1377,20 +1378,34 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str, voice_rate: float 
 
             rate = f'{"+" if voice_rate > 1.0 else "-"}{int(abs((voice_rate - 1.0) * 100))}%'
             print(f"voice rate: {rate}")
+            # ssml_fast = f"""
+            # <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
+            #     <voice name="{speech_config.speech_synthesis_voice_name}">
+            #         <prosody rate="{rate}">
+            #             {text}
+            #         </prosody>
+            #     </voice>
+            # </speak>
+            # """
             ssml_fast = f"""
-            <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
-                <voice name="{speech_config.speech_synthesis_voice_name}">
-                    <prosody rate="{rate}">
-                        {text}
-                    </prosody>
-                </voice>
-            </speak>
-            """
+                       <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="zh-CN">
+                            <voice name="zh-CN-XiaoxiaoNeural">
+                                <mstts:express-as style="lyrical" styledegree="1.2">
+                                    <prosody rate="{rate}">
+                                         {text}
+                                     </prosody>
+                                </mstts:express-as>
+                            </voice>
+                        </speak>
+                       """
             result = speech_synthesizer.speak_ssml_async(ssml_fast).get()
             # result = speech_synthesizer.speak_text_async(ssml_fast).get()
 
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 logger.success(f"azure v2 speech synthesis succeeded: {voice_file}")
+                # todo: 算法计算sub_maker
+                # if not sub_maker.subs:
+                #     pass
                 return sub_maker
             elif result.reason == speechsdk.ResultReason.Canceled:
                 cancellation_details = result.cancellation_details
@@ -1546,9 +1561,9 @@ if __name__ == "__main__":
         # "zh-CN-XiaohanNeural-Female-V2",
         # "zh-CN-XiaomoNeural-Female-V2",
         # "zh-CN-XiaorouNeural-Female-V2",
-        # "zh-CN-Xiaochen:DragonHDLatestNeural-Female-V2",
+        "zh-CN-Xiaochen:DragonHDLatestNeural-Female-V2",
         # "zh-CN-XiaoxiaoNeural-Female-V2",
-        "zh-CN-XiaochenNeural-Female-V2",
+        # "zh-CN-XiaochenNeural-Female-V2",
         # "zh-CN-XiaochenMultilingualNeural-Female-V2",
 
         ## V2 男生
@@ -1558,7 +1573,7 @@ if __name__ == "__main__":
 
     ]
 
-    text = """你有没有想过，你所有的不快乐，都不是因为“过去”，而是你“现在”的一个选择？这个观点，听起来是不是有点反常识，甚至刺耳？我们很多人，穷其一生都在努力扮演“好孩子”、“好员工”、“好伴侣”。我们小心翼翼地活在别人的目光里，总怕说错话、做错事，被贴上标签，被指指点点。结果呢？活得战战兢兢，小心翼翼，却还是觉得处处不顺心，甚至把一切不顺归咎于原生家庭、过去的经历？"""
+    text = """  这份清醒且独立的灵魂力量，来自今天要分享的——《简·爱》"""
 
     text = _format_text(text)
     lines = utils.split_string_by_punctuations(text)
@@ -1566,10 +1581,10 @@ if __name__ == "__main__":
 
     for voice_name in voice_names:
         save_name = voice_name.replace(':', '-')
-        voice_file = f"{temp_dir}/{save_name}.mp3"
-        subtitle_file = f"{temp_dir}/{save_name}.srt"
+        voice_file = f"{temp_dir}/xiaoxiao{time.time()}.mp3"
+        subtitle_file = f"{temp_dir}/xiaoxiao{time.time()}.srt"
         sub_maker = tts(
-            text=text, voice_name=voice_name, voice_rate=1.2, voice_file=voice_file
+            text=text, voice_name=voice_name, voice_rate=1.0, voice_file=voice_file
         )
         create_subtitle(sub_maker=sub_maker, text=text, subtitle_file=subtitle_file)
         audio_duration = get_audio_duration(sub_maker)
