@@ -211,7 +211,7 @@ def combine_videos(
 
             # wirte clip to temp file
             clip_file = f"{output_dir}/temp-clip-{i + 1}.mp4"
-            clip.write_videofile(clip_file, logger=None, fps=fps, codec=video_codec)
+            clip.write_videofile(clip_file, logger=None, fps=fps, codec=video_codec, audio_codec='aac')
             time.sleep(0.1)  # Add a small delay to ensure file is fully written
             close_clip(clip)
 
@@ -348,13 +348,15 @@ def combine_videos(
     # Handle case where filter_complex is empty (e.g., only one video clip)
     if not filter_graph:
         # Reconstruct command for single clip case
+        filter_complex_str = "[0:a][1:a]amix=inputs=2:duration=longest[a_out]"
         command = [
             'ffmpeg',
             '-y',
             '-i', processed_clips[0].file_path,  # First video input
             '-i', audio_file,  # Audio input
+            '-filter_complex', filter_complex_str,
             '-map', '0:v',  # Map video from first input
-            '-map', '1:a',  # Map audio from second input (audio_file)
+            '-map', '[a_out]',  # Map audio from second input (audio_file)
             '-pix_fmt', 'yuv420p',  # Add pixel format for wider compatibility
             '-c:v', video_codec,
             '-c:a', audio_codec,
@@ -545,11 +547,10 @@ def preprocess_video(materials: List[MaterialInfo], target_size=(1080, 1920), zo
                     if clip.duration < material.duration:
                         # 循环补足时长
                         loops = int(material.duration / clip.duration) + 1
-                        final_clip = concatenate_videoclips([clip] * loops).subclip(0, material.duration)
+                        final_clip = concatenate_videoclips([clip] * loops).subclipped(0, material.duration)
                     else:
                         # 截取中间部分
-                        start_time = (clip.duration - material.duration) / 2
-                        final_clip = clip.subclip(start_time, start_time + material.duration)
+                        final_clip = clip.subclipped(0, end_time=material.duration)
                     # 输出处理后的视频
                     video_file = f"{material.url}_adjusted.mp4"
                     final_clip.write_videofile(video_file, fps=30, logger=None)
@@ -793,8 +794,8 @@ def generate_video(
 
         return animated_clip
 
-    video_clip = VideoFileClip(video_path).without_audio()
-    audio_clip = AudioFileClip(audio_path).with_effects(
+    video_clip = VideoFileClip(video_path)
+    audio_clip = video_clip.audio.with_effects(
         [afx.MultiplyVolume(params.voice_volume)]
     )
 
@@ -842,40 +843,40 @@ def generate_video(
     del video_clip
 
 if __name__ == '__main__':
-    # preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/test/video/{i}.png', duration=5) for i in (1, )])
+    preprocess_video([MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/resource/template/cat.mp4', duration=20)])
     # combine_videos(combined_video_path=r'C:\code\github\MoneyPrinterTurbo\test\combine\combined.mp4',
     #                video_paths=[f'C:/code/github/MoneyPrinterTurbo/test/resources/{i}.png.mp4' for i in range(8)],
     #                audio_file=r'C:\code\github\MoneyPrinterTurbo\test\combine\all_audio.mp3')
-    video_script = ["这片海，吞噬过无数的船，却从没能吞噬一个真正的灵魂。",
-                    "海明威用《老人与海》告诉我们，人可以被毁灭，但不能被打败。",]
-    task_id = "task_id3"
-    params = TaskVideo2Request(
-        video_subject='测试',
-        video_script=video_script,
-        video_materials=[MaterialInfo(
-            url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/materials/{i}.jpeg')
-                         for
-                         i in range(len(video_script))],
-        voice_name="zh-CN-XiaochenNeural-Female-V2",
-        voice_rate=1.0,
-        video_source="local",
-        video_transition_mode=VideoTransitionMode.shuffle,
-        subtitle_position='center',
-        font_name='AaZhuNiWoMingMeiXiangChunTian.ttf',
-        font_size=90,
-        text_fore_color="#ff0000",
-        text_background_color=True,
-        stroke_color="#FFD700",
-        stroke_width=2,
-    )
-    # print(start2(task_id, params))
-
-    # 合成最终视频
-    generate_video(
-        video_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/combined-1.mp4",
-        audio_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/all_audio.mp3",
-        subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/subtitle.srt",
-        output_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/output.mp4",
-        params=params,
-    )
+    # video_script = ["这片海，吞噬过无数的船，却从没能吞噬一个真正的灵魂。",
+    #                 "海明威用《老人与海》告诉我们，人可以被毁灭，但不能被打败。",]
+    # task_id = "task_id3"
+    # params = TaskVideo2Request(
+    #     video_subject='测试',
+    #     video_script=video_script,
+    #     video_materials=[MaterialInfo(
+    #         url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/materials/{i}.jpeg')
+    #                      for
+    #                      i in range(len(video_script))],
+    #     voice_name="zh-CN-XiaochenNeural-Female-V2",
+    #     voice_rate=1.0,
+    #     video_source="local",
+    #     video_transition_mode=VideoTransitionMode.shuffle,
+    #     subtitle_position='center',
+    #     font_name='AaZhuNiWoMingMeiXiangChunTian.ttf',
+    #     font_size=90,
+    #     text_fore_color="#ff0000",
+    #     text_background_color=True,
+    #     stroke_color="#FFD700",
+    #     stroke_width=2,
+    # )
+    # # print(start2(task_id, params))
+    #
+    # # 合成最终视频
+    # generate_video(
+    #     video_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/combined-1.mp4",
+    #     audio_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/all_audio.mp3",
+    #     subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/subtitle.srt",
+    #     output_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/output.mp4",
+    #     params=params,
+    # )
     pass

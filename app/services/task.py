@@ -388,17 +388,20 @@ def start2(task_id, params: TaskVideo2Request):
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
 
-    srt_content = Path(subtitle_path).read_text(encoding='utf-8')
-    subtitle_entries = calculate_durations(srt_content)
-    matched_results = match_subtitles_to_scripts(subtitle_entries, params.video_script)
-    last_time = 0
-    for index, result in enumerate(matched_results):
-        if index == len(matched_results) - 1:
-            duration = round(audio_duration - last_time, 3)
-        else:
-            duration = round(result['end_ms'] - last_time, 3)
-            last_time = result['end_ms']
-        params.video_materials[index].duration = duration
+    if params.resource_type == 1:
+        srt_content = Path(subtitle_path).read_text(encoding='utf-8')
+        subtitle_entries = calculate_durations(srt_content)
+        matched_results = match_subtitles_to_scripts(subtitle_entries, params.video_script)
+        last_time = 0
+        for index, result in enumerate(matched_results):
+            if index == len(matched_results) - 1:
+                duration = round(audio_duration - last_time, 3)
+            else:
+                duration = round(result['end_ms'] - last_time, 3)
+                last_time = result['end_ms']
+            params.video_materials[index].duration = duration
+    elif params.resource_type == 2:
+        params.video_materials[0].duration = audio_duration
 
     # 5. Get video materials
     downloaded_videos = get_video_materials(
@@ -463,29 +466,29 @@ if __name__ == "__main__":
     # print(start2(task_id, params))
     video_script = ["这片海，吞噬过无数的船，却从没能吞噬一个真正的灵魂。",
                     "海明威用《老人与海》告诉我们，人可以被毁灭，但不能被打败。",
-                    # "真正的胜利，不是征服了什么，而是你经历了什么，又如何站立。",
-                    # "即使只剩一副骨架，那也是荣耀的勋章，是与命运搏斗的见证。",
-                    # "孤独是每个勇士的必修课，而信念，是那漫长航程中唯一的星光。",
-                    # "敬那些不肯向生活低头的人，你的海上，永不落幕。",
                     ]
 
-    task_id = "task_id3"
+    task_id = "task_id4"
     params = TaskVideo2Request(
         video_subject='测试',
         video_script=video_script,
-        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/storage/tasks/5dc3f3c2-aba2-48af-98c9-dcfe716f00ab/materials/{i}.jpeg') for
-                         i in range(len(video_script))],
+        video_materials=[MaterialInfo(url=f'C:/code/github/MoneyPrinterTurbo/resource/template/cat.mp4')
+                         ],
         voice_name="zh-CN-XiaochenNeural-Female-V2",
         voice_rate=1.0,
         video_source="local",
-        video_transition_mode=VideoTransitionMode.shuffle,
-        subtitle_position='center',
+        video_transition_mode=VideoTransitionMode.fade_in,
+        subtitle_position='custom',
+        custom_position=35,
         font_name='AaZhuNiWoMingMeiXiangChunTian.ttf',
         font_size=80,
-        text_fore_color= "#ff0000",
+        # text_fore_color= "#ff0000",
+        text_fore_color= "#000000",
         text_background_color= True,
-        stroke_color= "#0000ff",
+        # stroke_color= "#0000ff",
+        stroke_color= "#c3c3c3",
         stroke_width = 2,
+        resource_type=2,
     )
     # print(start2(task_id, params))
 
@@ -500,10 +503,10 @@ if __name__ == "__main__":
     # )
 
     # 合成最终视频
-    video.generate_video(
-        video_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/combined-1.mp4",
-        audio_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/all_audio.mp3",
-        subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/subtitle.srt",
-        output_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/output.mp4",
-        params=params,
-    )
+    # video.generate_video(
+    #     video_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/combined-1.mp4",
+    #     audio_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/all_audio.mp3",
+    #     subtitle_path="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/subtitle.srt",
+    #     output_file="C:/code/github/MoneyPrinterTurbo/storage/tasks/task_id3/output.mp4",
+    #     params=params,
+    # )

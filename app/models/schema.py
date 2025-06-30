@@ -182,6 +182,7 @@ class TaskVideo2Request(VideoParams, BaseModel):
     video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.sequential
     video_transition_mode: Optional[VideoTransitionMode] = VideoTransitionMode.shuffle
     video_zoom_factor: float = 1.1
+    resource_type: int = 1  # 1. 使用图片资源，按照video_script中每一条语音的长度生成视频素材  2. 使用视频资源，按照总长度生成视频素材
     pass
 
 class TaskQueryRequest(BaseModel):
